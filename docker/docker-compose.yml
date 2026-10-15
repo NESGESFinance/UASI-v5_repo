@@ -1,0 +1,71 @@
+# =============================================================================
+# UASI v5 Enterprise Production — docker compose
+# Uso (desde la raíz del repo):
+#   cp .env.example .env && ./scripts/generar_secretos.sh --write
+#   docker compose -f docker/docker-compose.yml --env-file .env up -d --build
+# =============================================================================
+name: uasi-v5
+
+services:
+  uasi-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: uasi-v5:5.1.0
+    container_name: uasi-api
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    env_file:
+      - ../.env
+    environment:
+      # Valores forzados dentro del contenedor (prevalecen sobre .env)
+      PATH_WORKSPACE: /data
+      PORT: "8000"
+      RATE_LIMIT_STORAGE_URI: redis://redis:6379
+      UASI_ENV: ${UASI_ENV:-production}
+      GUNICORN_WORKERS: ${GUNICORN_WORKERS:-4}
+      # Obligatoria: el arranque falla si no está definida en .env
+      SECRET_JWT_KEY: ${SECRET_JWT_KEY:?Defina SECRET_JWT_KEY en .env (./scripts/generar_secretos.sh --write)}
+    volumes:
+      - uasi_workspace:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; r=urllib.request.urlopen('http://127.0.0.1:8000/api/v5/health', timeout=4); sys.exit(0 if r.status==200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: uasi-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+    expose:
+      - "6379"
+
+volumes:
+  uasi_workspace:
+    name: uasi_workspace
