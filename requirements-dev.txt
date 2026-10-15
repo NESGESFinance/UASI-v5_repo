@@ -1,0 +1,9 @@
+# Dependencias de desarrollo (incluye las de producción)
+-r requirements.txt
+pytest==9.1.1
+httpx==0.28.1
+black==26.10.1
+ruff==0.17.0
+mypy==2.4.0
+# Backend de rate limiting multi-worker (RATE_LIMIT_STORAGE_URI=redis://...)
+redis==8.1.0

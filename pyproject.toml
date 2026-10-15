@@ -1,0 +1,77 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "uasi-v5"
+version = "5.1.0"
+description = "UASI v5 Enterprise Production: agentes de ML gobernados, ledger auditable y anclaje en Bitcoin L1 vía OpenTimestamps"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Equipo UASI" }]
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-ra -q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+# ---------------------------------------------------------------------------
+[tool.black]
+line-length = 120
+target-version = ["py311"]
+# main.py y tests/test_uasi_v5.py se conservan byte a byte idénticos al entregable
+# v5.1.0 (trazabilidad/auditoría); black no los reformatea.
+extend-exclude = "(uasi_workspace|src/uasi_v5/main\\.py|tests/test_uasi_v5\\.py)"
+
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 130
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["uasi_workspace"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+ignore = [
+    "E501",   # longitud de línea: la gestiona black
+    "B008",   # Depends()/Query() en argumentos por defecto es idiomático en FastAPI
+    "S104",   # bind a 0.0.0.0 intencionado (contenedor)
+    "S301",   # joblib.load solo tras verificar checksum/HMAC (ver cargar_modelo_seguro)
+    "S310",   # urllib en calendarios OTS (URLs de lista blanca)
+    "UP006", "UP007", "UP035", "UP045",  # typing.Dict/Optional mantenidos por legibilidad
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "S105", "S106"]
+# Copia íntegra de la suite original (no se modifica): cabecera coding y `import math` heredados
+"tests/test_uasi_v5.py" = ["S101", "S105", "S106", "UP009", "F401"]
+
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+packages = ["uasi_v5"]
+ignore_missing_imports = true
+warn_unused_configs = true
+warn_redundant_casts = true
+check_untyped_defs = false
+no_implicit_optional = true
+
+# Deuda técnica conocida de tipado en main.py (copia íntegra del entregable v5.1.0):
+# estados de modelo devueltos como `Any | None` por cargar_modelo_seguro() y la
+# firma del handler de slowapi. No afectan a la ejecución (tests en verde); se
+# silencian de forma acotada a este módulo hasta tiparlos con TypedDict.
+[[tool.mypy.overrides]]
+module = "uasi_v5.main"
+disable_error_code = ["union-attr", "index", "arg-type", "assignment", "var-annotated", "dict-item"]

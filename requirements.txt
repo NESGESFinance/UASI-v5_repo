@@ -1,0 +1,22 @@
+# UASI v5 Enterprise Production — dependencias fijadas (Python 3.11)
+fastapi==0.143.0
+starlette==1.7.0
+uvicorn[standard]==0.54.0
+gunicorn==26.2.0
+pydantic==2.13.5
+python-jose[cryptography]==3.5.0
+# passlib se incluye por petición (hash de credenciales futuras); el código actual no lo importa.
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+slowapi==0.1.10
+joblib==1.6.0
+filelock==3.32.3
+scikit-learn==1.9.1
+scipy==1.14.1
+numpy==1.26.4
+python-json-logger==4.2.0
+opentimestamps==0.4.5
+opentimestamps-client==0.7.2
+httpx==0.28.1
+# Tests
+pytest==9.1.1
