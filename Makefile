@@ -12,7 +12,7 @@ HOST         ?= 0.0.0.0
 PORT         ?= 8000
 WORKERS      ?= 4
 COMPOSE      := docker compose -f docker/docker-compose.yml --env-file .env
-IMAGE        ?= uasi-v5:5.1.0
+IMAGE        ?= uasi-v5:5.2.0
 
 export PYTHONPATH := $(CURDIR)/src
 
