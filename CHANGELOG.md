@@ -6,6 +6,48 @@ sigue [Versionado Semántico](https://semver.org/lang/es/).
 
 ---
 
+## [5.2.0-enterprise] - 2026-10-16
+
+Arquitectura modular por capas y nueva capa multiagente **JEV → UASI → JEV**. Es compatible con la
+v5.1.0: los endpoints existentes y `from uasi_v5.main import ...` se mantienen.
+
+### Cambiado
+- El antiguo `main.py` único se divide en el paquete `src/uasi_v5/` con subpaquetes `core`, `esquemas`,
+  `seguridad`, `persistencia`, `ml`, `orquestacion`, `auditoria`, `agentes_jev` y `api`. Los singletons
+  se cablean en `servicios.py`; `main.py` queda como fachada de reexportación.
+- Versión 5.2.0-enterprise en `pyproject.toml`, `__init__`, configuración, Makefile y Docker.
+
+### Añadido
+- **Capa JEV**: `POST /api/v5/jev-dispatch` recibe una `SolicitudJEV` firmada, la despacha en paralelo a
+  agentes especializados (`python`, `typescript`, `javascript`, `solidity`, `rust`, `go`, `java`) y devuelve
+  una `RespuestaJEV` firmada con inferencia de tipos, código binding y resumen por lenguaje.
+- `GET /api/v5/jev/agentes`: lenguajes y tipos de tarea disponibles.
+- `DispatcherMultiagenteJEV`: `ThreadPoolExecutor` (`JEV_MAX_WORKERS`), aislamiento de errores por agente,
+  estado global `exito` / `error_parcial` / `error` e inyección de la integridad del ledger
+  (`AUDITORIA_LEDGER`) y del health check (`EVALUACION_MODELO`).
+- Agentes deterministas que **no ejecutan código**; `hash_resultado` = SHA-256 del JSON canónico.
+- Evento de ledger `DISPATCH_JEV` con los hashes de datos y de resultados.
+- Variables `JEV_HMAC_KEY` y `JEV_MAX_WORKERS`; aviso al arrancar si falta `JEV_HMAC_KEY`.
+- `tests/test_jev.py` (12 tests).
+- **Automatización JEV:** `POST /api/v5/jev-dispatch/lote` (lotes de hasta `JEV_LOTE_MAX` solicitudes, cada una
+  firmada y registrada por separado) y `GET /api/v5/jev/metricas` (contadores por lenguaje, tarea, rechazos,
+  caché y callbacks).
+- **Optimización JEV:** caché determinista LRU + TTL de resultados de agentes (`JEV_CACHE_MAX`, `JEV_CACHE_TTL`;
+  campo `desde_cache`), excluyendo `AUDITORIA_LEDGER` y `EVALUACION_MODELO`.
+- **Idempotencia** por `id_solicitud`: un reintento idéntico devuelve la misma respuesta firmada sin re-ejecutar.
+- **Callback automático** opcional a JEV (`metadatos.url_callback`) con reintentos, backoff y evento `CALLBACK_JEV`.
+- SDK de referencia `clientes/python/jev_cliente.py` (stdlib) y `clientes/typescript/jevCliente.ts` (Node ≥ 18),
+  compatibles byte a byte con el JSON canónico del servidor.
+- `tests/test_jev_automatizacion.py` (17 tests). Total: 46 pasan, 1 omitido (requiere red).
+
+### Seguridad
+- `seguridad/jev_firma.py`: HMAC-SHA256 sobre el JSON canónico sin campos de firma, comparación en tiempo
+  constante (`hmac.compare_digest`) y fail-closed: sin clave → 503, firma inválida → 401. Además del JWT.
+- `seguridad/jev_replay.py`: ventana temporal del `timestamp` (`JEV_VENTANA_SEGUNDOS`, 401 fuera de ventana) y
+  409 si un `id_solicitud` se reutiliza con otro cuerpo.
+- Callbacks deny-by-default contra SSRF: lista blanca `JEV_CALLBACK_HOSTS`, solo `https` (salvo localhost),
+  sin credenciales en la URL y sin redirecciones.
+
 ## [5.1.0-enterprise] - 2026-10-12
 
 Revisión correctiva **P1 + P2 + P3**, basada en el informe técnico ejecutivo sobre la v5.0.0.
@@ -112,6 +154,7 @@ Revisión correctiva **P1 + P2 + P3**, basada en el informe técnico ejecutivo s
 - Endpoint `POST /api/v1/procesar`.
 - `GuardiánAuditoríaLegacy`: registro en JSON plano, sin encadenamiento hash.
 
+[5.2.0-enterprise]: #520-enterprise---2026-10-16
 [5.1.0-enterprise]: #510-enterprise---2026-10-12
 [5.0.0-ENTERPRISE-UNIFIED]: #500-enterprise-unified
 [4.0]: #40

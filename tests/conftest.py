@@ -49,7 +49,10 @@ class _AliasModuloHistorico(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         return None
 
     def create_module(self, spec):
-        sys.modules.pop(NOMBRE_REAL, None)  # reimporta con el entorno actual
+        # Reimporta TODO el paquete modular con el entorno actual: la configuración
+        # (uasi_v5.core.config) y los singletons (uasi_v5.servicios) se fijan al importar.
+        for nombre in [m for m in sys.modules if m.startswith("uasi_v5.")]:
+            sys.modules.pop(nombre, None)
         return importlib.import_module(NOMBRE_REAL)
 
     def exec_module(self, module):  # el módulo ya está ejecutado en create_module

@@ -1,14 +1,38 @@
-# Arquitectura de UASI v5 Enterprise (5.1.0-enterprise)
+# Arquitectura de UASI v5 Enterprise (5.2.0-enterprise)
 
 ## 1. Visión general
 
-UASI v5 es un servicio **FastAPI** monolítico y modular (`src/uasi_v5/main.py`) con tres planos:
+UASI v5 es un servicio **FastAPI** organizado como un **paquete modular por capas** (`src/uasi_v5/`).
+`src/uasi_v5/main.py` es solo una fachada que reexporta la API pública (`from uasi_v5.main import app`
+sigue funcionando). El servicio tiene cuatro planos:
 
 | Plano | Componentes | Función |
 |---|---|---|
-| **Control y seguridad** | `LimiteTamanoPayloadMiddleware`, SlowAPI, `require_auth`, `GuardiánGobernanzaSeguridad` | Limitar, autenticar, autorizar por intención y sanear los datos de entrada. |
+| **Control y seguridad** | `LimiteTamanoPayloadMiddleware`, SlowAPI, `require_auth`, `GuardiánGobernanzaSeguridad`, `jev_firma` | Limitar, autenticar, autorizar por intención, verificar firmas JEV y sanear los datos de entrada. |
 | **Cómputo (ML)** | Agentes legacy, `AgenteCerebralProfundo`, `AgenteVectorialEvolutivo`, `AgenteEnsambladoExplicable`, `MotorStreamingContinuo`, `AgenteAnalistaDatosMetacognitivo`, `OrquestadorSemanticoUASI` | Entrenar y evaluar modelos con métricas honestas. |
+| **Multiagente JEV** | `DispatcherMultiagenteJEV` + 7 agentes por lenguaje | Recibir datos exactos de JEV y devolver inferencia de tipos, bindings y resúmenes por lenguaje. |
 | **Auditoría y confianza** | `LedgerAuditoriaCriptografica`, `MerkleOpenTimestampsManager` | Registro inmutable, raíz de Merkle diaria y anclaje en Bitcoin L1. |
+
+### 1.1 Estructura del paquete
+
+```text
+src/uasi_v5/
+├── main.py              # fachada: app + reexportaciones (__all__)
+├── servicios.py         # singletons cableados: ledger, merkle_manager, orquestador, dispatcher_jev
+├── core/                # config.py · excepciones.py · registro.py (log JSON) · utilidades.py
+├── esquemas/            # solicitudes.py (v1/v5) · jev.py (SolicitudJEV, RespuestaJEV, ResultadoAgenteJEV)
+├── seguridad/           # autenticacion.py (JWT) · gobernanza.py · limites.py · jev_firma.py (HMAC)
+├── persistencia/        # almacen_modelos.py (joblib + checksum/HMAC + locks)
+├── ml/                  # evaluacion.py · agentes/{legacy, profundo, evolutivo, ensamblado, streaming, metacognitivo}
+├── orquestacion/        # orquestador.py (OrquestadorSemanticoUASI)
+├── agentes_jev/         # base.py · dispatcher.py · {python, typescript, javascript, solidity, rust, go, java}_agente.py
+├── auditoria/           # ledger.py · merkle_ots.py
+└── api/                 # app.py (lifespan, middlewares) · manejadores.py · rutas/{autenticacion, v1, v5, jev, auditoria, salud}
+```
+
+Las dependencias entre capas se cablean únicamente en `servicios.py`. El dispatcher JEV recibe la
+verificación del ledger y el health check como *callables*, por lo que no importa ni el ledger ni
+`servicios` (sin imports circulares).
 
 ## 2. Ciclo de vida de una petición
 
@@ -107,7 +131,7 @@ hash_datos  = SHA256(JSON canónico de datos)
 hash_bloque = SHA256(JSON canónico de {indice, timestamp, fecha, evento, actor, datos, hash_datos, hash_previo})
 ```
 
-Eventos: `GENESIS`, `PROCESAMIENTO_V1`, `EJECUCION_MAESTRA_V5`, `INGESTA_STREAMING` y `ANCLAJE_MERKLE_OTS`.
+Eventos: `GENESIS`, `PROCESAMIENTO_V1`, `EJECUCION_MAESTRA_V5`, `INGESTA_STREAMING`, `DISPATCH_JEV` y `ANCLAJE_MERKLE_OTS`.
 `verificar_integridad()` comprueba la continuidad de los índices, el encadenamiento, `hash_datos` y `hash_bloque`.
 
 ### 5.2 Merkle + OpenTimestamps
@@ -129,7 +153,112 @@ PATH_WORKSPACE/
 └── ots_proofs/   # <fecha>.ots · <fecha>_<sello>.ots · <fecha>.json
 ```
 
-## 7. Despliegue
+## 7. Capa multiagente JEV (JEV → UASI → JEV)
+
+JEV es un sistema externo que emite datos exactos por HTTP/JSON. UASI los reparte entre agentes
+especializados por lenguaje y devuelve una respuesta firmada.
+
+```text
+ JEV                                   UASI                                            JEV
+  │  POST /api/v5/jev-dispatch          │                                                ▲
+  │  Authorization: Bearer <JWT>        │                                                │
+  │  SolicitudJEV + firma_hmac ────────►├─ 1. Pydantic (extra=forbid, lenguajes válidos) ► 422
+  │                                     ├─ 2. require_auth (JWT) ─────────────────────── ► 401/503
+  │                                     ├─ 3. verificar_firma_jev ── sin clave ► 503 · inválida ► 401
+  │                                     ├─ 4. guardian.validar_metadatos ─────────────── ► 403/422
+  │                                     ├─ 5. DispatcherMultiagenteJEV (ThreadPoolExecutor)
+  │                                     │      ├─ python ─┬─ typescript ─┬─ javascript ─┬─ solidity
+  │                                     │      └─ rust ───┴─ go ─────────┴─ java        (aislados)
+  │                                     ├─ 6. ledger.registrar("DISPATCH_JEV", …)
+  │                                     └─ 7. RespuestaJEV + firma_respuesta ────────────┘
+```
+
+### 7.1 Agentes por lenguaje
+
+Cada agente es **determinista** y **no ejecuta código**: infiere el tipo de cada campo de `datos`,
+lo traduce a su lenguaje, genera el binding como texto y añade un resumen de la tarea. La misma
+entrada produce siempre el mismo `hash_resultado` (SHA-256 del JSON canónico de `datos_resultado`).
+
+| Lenguaje | Módulo | Binding generado | Ejemplo de tipos (int / float / lista / objeto) |
+|---|---|---|---|
+| `python` | `python_agente.py` | `@dataclass(frozen=True)` | `int` / `float` / `List[T]` / `Dict[str, Any]` |
+| `typescript` | `typescript_agente.py` | `export interface` (`readonly`) | `number` / `number` / `Array<T>` / `Record<string, unknown>` |
+| `javascript` | `javascript_agente.py` | `@typedef` JSDoc + objeto `Object.freeze` | `number` / `number` / `Array<T>` / `Object` |
+| `solidity` | `solidity_agente.py` | `struct` (`pragma ^0.8.20`) | `int256` / `int256` (punto fijo 1e18) / `T[]` / `bytes` |
+| `rust` | `rust_agente.py` | `struct` con `serde` (`#[serde(rename)]`) | `i64` / `f64` / `Vec<T>` / `serde_json::Map` |
+| `go` | `go_agente.py` | `struct` exportado con etiquetas `json` | `int64` / `float64` / `[]T` / `map[string]any` |
+| `java` | `java_agente.py` | clase `final` inmutable con getters | `long` / `double` / `List<T>` / `Map<String, Object>` |
+
+Tipos de tarea (`tipo_tarea`) y resumen que produce cada uno:
+
+| Tarea | Resumen |
+|---|---|
+| `INFERENCIA_MULTILENGUAJE` | modelo, nº de entradas y de campos |
+| `ANALISIS_DATOS` | n/min/max/media de cada serie numérica |
+| `EVALUACION_MODELO` | métricas numéricas + estado de salud de UASI (inyectado) |
+| `AUDITORIA_LEDGER` | integridad y nº de bloques del ledger (inyectado) |
+| `SINCRONIZACION_RWA` | red, nº de activos y valor total |
+| `VALIDACION_CRUZADA` | k folds y tamaño de cada fold |
+| `GENERACION_BINDINGS` | nº de campos y nombre del tipo generado |
+
+El estado global es `exito` (todos los agentes OK), `error_parcial` (alguno falla) o `error` (ninguno
+OK). Un agente que falla no afecta a los demás. `GET /api/v5/jev/agentes` lista lenguajes y tareas.
+
+### 7.2 Flujo de firma HMAC-SHA256
+
+```text
+mensaje = json.dumps(cuerpo_sin_firmas, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+firma   = HMAC-SHA256(JEV_HMAC_KEY, mensaje.encode("utf-8")).hexdigest()     # 64 caracteres hex
+```
+
+- **Solicitud**: JEV firma el JSON exacto que envía, sin `firma_hmac`. UASI verifica sobre el cuerpo
+  recibido (no sobre los valores por defecto que añade, como `id_solicitud` o `timestamp`) con
+  `hmac.compare_digest`.
+- **Respuesta**: UASI firma la respuesta sin `firma_respuesta`; JEV la verifica igual.
+- **Fail-closed**: `JEV_HMAC_KEY` se lee en cada petición. Sin clave → 503; firma ausente o inválida → 401.
+
+### 7.3 Automatización y optimización
+
+Pipeline completo de cada solicitud en `api/rutas/jev.py`:
+
+```text
+JWT ─► firma HMAC (503/401) ─► ventana temporal (401) ─► gobernanza de metadatos (403)
+    ─► idempotencia por id_solicitud (respuesta previa | 409) ─► dispatcher (+ caché determinista)
+    ─► ledger DISPATCH_JEV ─► RespuestaJEV firmada ─► callback opcional en segundo plano (CALLBACK_JEV)
+```
+
+| Mecanismo | Módulo | Comportamiento |
+|---|---|---|
+| **Anti-replay** | `seguridad/jev_replay.py` | Si JEV envía `timestamp`, debe estar dentro de ±`JEV_VENTANA_SEGUNDOS`; si no → 401. Sin zona horaria se interpreta como UTC. |
+| **Idempotencia** | `seguridad/jev_replay.py` | Si JEV envía `id_solicitud`: un reintento idéntico devuelve la misma respuesta firmada (cabecera `X-JEV-Idempotente: true`, sin re-ejecutar ni nuevo bloque de ledger); mismo id con otro cuerpo → 409. |
+| **Caché determinista** | `agentes_jev/automatizacion.py` | LRU + TTL por (agente, tarea, datos). Los agentes son deterministas, así que el resultado reutilizado es idéntico (`hash_resultado` igual) y se marca con `desde_cache: true`. `AUDITORIA_LEDGER` y `EVALUACION_MODELO` nunca se cachean (dependen del estado vivo). Los errores no se cachean. |
+| **Lotes** | `POST /api/v5/jev-dispatch/lote` | Hasta `JEV_LOTE_MAX` solicitudes, cada una con su propia firma y su propio bloque `DISPATCH_JEV`. Un elemento inválido no detiene el resto (`codigo_http` + `error` por elemento). El resumen va firmado (`firma_respuesta`). |
+| **Métricas** | `GET /api/v5/jev/metricas` | Por lenguaje (ejecuciones, éxitos, errores, aciertos de caché, duración media real), por tipo de tarea, rechazos por motivo, respuestas idempotentes, callbacks y estado de la caché. |
+| **Callback a JEV** | `agentes_jev/callback.py` | Si `metadatos.url_callback` existe, UASI hace POST de la respuesta firmada (cabecera `X-JEV-Firma`) en segundo plano, con 3 reintentos y backoff exponencial (0,5 s, 1 s…); los 4xx no transitorios no se reintentan. Cada entrega se registra como `CALLBACK_JEV`. La cabecera `X-JEV-Callback` indica `programado` o `rechazado: motivo`. |
+
+**Anti-SSRF del callback (deny-by-default):** solo hosts exactos de `JEV_CALLBACK_HOSTS`; `https`
+obligatorio (`http` solo para `localhost`/`127.0.0.1`); URLs con credenciales rechazadas; sin seguir
+redirecciones.
+
+**Estado en memoria:** caché, métricas e idempotencia viven en cada proceso. Con varios workers de
+gunicorn o varias réplicas, cada uno mantiene su propio estado: para idempotencia estricta entre
+réplicas, enrute por `id_solicitud` o use un único worker para JEV. (Siguiente paso posible: moverlo a
+Redis, ya presente en docker-compose.)
+
+### 7.4 SDK cliente de referencia
+
+| Archivo | Entorno | Funciones |
+|---|---|---|
+| `clientes/python/jev_cliente.py` | Python ≥ 3.9, solo stdlib | `construir_solicitud`, `firmar`, `verificar`, `ClienteJEV.despachar` / `despachar_lote` |
+| `clientes/typescript/jevCliente.ts` | Node ≥ 18 (`node:crypto` + `fetch`) | `construirSolicitud`, `firmar`, `verificarTexto`, `ClienteJEV` |
+
+El cliente TypeScript reproduce el JSON canónico de Python: formatea los números no enteros como
+`repr(float)` (p. ej. `1e-05`) y verifica las respuestas sobre el **texto** recibido conservando los
+literales numéricos (Python serializa `12.0`, que JS convertiría en `12`). Limitaciones: claves con
+caracteres fuera del BMP y cadenas con sustitutos UTF-16 sueltos. Para importes RWA se recomienda
+enviar cadenas decimales.
+
+## 8. Despliegue
 
 - **Gunicorn + UvicornWorker** (`uasi_v5.main:app`, `PYTHONPATH=src`), con 4 workers por defecto.
 - Con varios workers, `RATE_LIMIT_STORAGE_URI=redis://...` hace que el límite se comparta entre ellos.
@@ -137,7 +266,7 @@ PATH_WORKSPACE/
   sobre `/api/v5/health` y volumen `/data`. Compose añade Redis 7.4, `read_only` y `cap_drop: [ALL]`.
 - Guía completa: [`../DEPLOY_README.md`](../DEPLOY_README.md).
 
-## 8. Variables de entorno principales
+## 9. Variables de entorno principales
 
 | Variable | Defecto | Uso |
 |---|---|---|
@@ -153,6 +282,14 @@ PATH_WORKSPACE/
 | `OTS_CALENDARS` / `OTS_MIN_CALENDARS` / `OTS_TIMEOUT_SECONDS` | 3 calendarios públicos / `1` / `10` | OpenTimestamps. |
 | `ESPLORA_API_URL` | `https://blockstream.info/api` | Contraste de las cabeceras de bloque. |
 | `UASI_UMBRAL_ENTROPIA_DESBALANCE` / `UASI_UMBRAL_ENTROPIA_FEATURES` | `0.85` / `0.90` | Umbrales metacognitivos. |
+| `JEV_HMAC_KEY` | *(vacía)* | Secreto compartido con JEV; sin él `/api/v5/jev-dispatch` devuelve 503. |
+| `JEV_MAX_WORKERS` | `4` | Hilos del dispatcher multiagente JEV. |
+| `JEV_CACHE_MAX` / `JEV_CACHE_TTL` | `512` / `600` | Caché determinista de resultados de agentes (0 la desactiva). Se leen al arrancar. |
+| `JEV_VENTANA_SEGUNDOS` | `300` | Tolerancia del `timestamp` de la solicitud (anti-replay). |
+| `JEV_IDEMPOTENCIA_TTL` | `900` | Segundos que se recuerda un `id_solicitud` (nunca menos que la ventana). |
+| `JEV_LOTE_MAX` | `20` | Máximo de solicitudes en `/api/v5/jev-dispatch/lote`. |
+| `JEV_CALLBACK_HOSTS` | *(vacía)* | Lista blanca de hosts para callbacks (vacía = callbacks deshabilitados). |
+| `JEV_CALLBACK_REINTENTOS` / `JEV_CALLBACK_TIMEOUT` | `3` / `5` | Reintentos y timeout (s) del callback. |
 | `LOG_LEVEL` | `INFO` | Nivel del log JSON. |
 
 La lista completa y comentada está en [`../.env.example`](../.env.example).

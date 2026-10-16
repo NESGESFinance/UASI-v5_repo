@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uasi-v5"
-version = "5.1.0"
+version = "5.2.0"
 description = "UASI v5 Enterprise Production: agentes de ML gobernados, ledger auditable y anclaje en Bitcoin L1 vía OpenTimestamps"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,9 +30,10 @@ filterwarnings = ["ignore::DeprecationWarning"]
 [tool.black]
 line-length = 120
 target-version = ["py311"]
-# main.py y tests/test_uasi_v5.py se conservan byte a byte idénticos al entregable
-# v5.1.0 (trazabilidad/auditoría); black no los reformatea.
-extend-exclude = "(uasi_workspace|src/uasi_v5/main\\.py|tests/test_uasi_v5\\.py)"
+# tests/test_uasi_v5.py se conserva byte a byte idéntico a la suite original y los
+# módulos de src/uasi_v5 son extracción literal del monolito v5.1.0 (trazabilidad de
+# auditoría: mismo código, solo reubicado); black no los reformatea.
+extend-exclude = "(uasi_workspace|src/uasi_v5/|tests/test_uasi_v5\\.py)"
 
 # ---------------------------------------------------------------------------
 [tool.ruff]
@@ -68,10 +69,14 @@ warn_redundant_casts = true
 check_untyped_defs = false
 no_implicit_optional = true
 
-# Deuda técnica conocida de tipado en main.py (copia íntegra del entregable v5.1.0):
-# estados de modelo devueltos como `Any | None` por cargar_modelo_seguro() y la
-# firma del handler de slowapi. No afectan a la ejecución (tests en verde); se
-# silencian de forma acotada a este módulo hasta tiparlos con TypedDict.
+# Deuda técnica conocida de tipado heredada del monolito v5.1.0 (ahora repartida en
+# módulos): estados de modelo devueltos como `Any | None` por cargar_modelo_seguro()
+# y anotaciones de diccionarios heterogéneos. No afectan a la ejecución (tests en
+# verde); se silencian de forma acotada a estos módulos hasta tiparlos con TypedDict.
 [[tool.mypy.overrides]]
-module = "uasi_v5.main"
+module = [
+    "uasi_v5.ml.agentes.*",
+    "uasi_v5.persistencia.almacen_modelos",
+    "uasi_v5.servicios",
+]
 disable_error_code = ["union-attr", "index", "arg-type", "assignment", "var-annotated", "dict-item"]
