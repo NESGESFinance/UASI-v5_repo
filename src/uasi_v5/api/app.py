@@ -10,7 +10,7 @@ from slowapi.middleware import SlowAPIMiddleware
 from starlette.concurrency import run_in_threadpool
 
 from uasi_v5.api.manejadores import registrar_manejadores
-from uasi_v5.api.rutas import auditoria, autenticacion, salud, v1, v5
+from uasi_v5.api.rutas import auditoria, autenticacion, jev, salud, v1, v5
 from uasi_v5.auditoria.merkle_ots import OTS_DISPONIBLE, OTS_ERROR_IMPORT
 from uasi_v5.core.config import (
     BITCOIN_NETWORK,
@@ -37,6 +37,8 @@ async def lifespan(app_: FastAPI):
         logger.warning("SECRET_JWT_KEY ausente: los endpoints protegidos responderán 503 (fail-closed).")
     elif len(SECRET_JWT_KEY) < 32:
         logger.warning("SECRET_JWT_KEY demasiado corta (< 32 caracteres).")
+    if not os.getenv("JEV_HMAC_KEY", "").strip():
+        logger.warning("JEV_HMAC_KEY ausente: /api/v5/jev-dispatch responderá 503 (fail-closed).")
     if not OTS_DISPONIBLE:
         logger.warning("OpenTimestamps no disponible", extra={"error": OTS_ERROR_IMPORT})
     if BITCOIN_NETWORK == "testnet" and OTS_CALENDARS and "opentimestamps.org" in ",".join(OTS_CALENDARS):
@@ -61,6 +63,6 @@ def crear_app() -> FastAPI:
     registrar_manejadores(app)
     app.add_middleware(SlowAPIMiddleware)
     app.add_middleware(LimiteTamanoPayloadMiddleware, max_bytes=MAX_PAYLOAD_BYTES)  # el más externo
-    for modulo in (autenticacion, v1, v5, auditoria, salud):
+    for modulo in (autenticacion, v1, v5, jev, auditoria, salud):
         app.include_router(modulo.router)
     return app

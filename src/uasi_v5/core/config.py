@@ -41,6 +41,11 @@ MAX_FEATURES = _env_int("UASI_MAX_FEATURES", 512)
 
 UASI_MODEL_HMAC_KEY = os.getenv("UASI_MODEL_HMAC_KEY", "")
 
+# Capa JEV (JEV → UASI multiagente → JEV)
+JEV_MAX_WORKERS = _env_int("JEV_MAX_WORKERS", 4)
+# Solo informativa: la firma lee JEV_HMAC_KEY con os.getenv en cada petición (rotación sin reinicio).
+JEV_HMAC_KEY = os.getenv("JEV_HMAC_KEY", "")
+
 BITCOIN_NETWORK = os.getenv("BITCOIN_NETWORK", "mainnet").lower()
 if BITCOIN_NETWORK not in ("mainnet", "testnet"):
     BITCOIN_NETWORK = "mainnet"

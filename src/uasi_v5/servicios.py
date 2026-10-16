@@ -5,6 +5,7 @@ la API y el orquestador, y el health check detallado.
 Es el único punto donde se "cablean" las dependencias entre capas:
     ledger ──► merkle_manager
     ledger + guardian + estado_salud_detallado ──► orquestador
+    ledger.verificar_integridad + estado_salud_detallado ──► dispatcher_jev (capa JEV)
 """
 
 from __future__ import annotations
@@ -14,9 +15,18 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 from uuid import uuid4
 
+from uasi_v5.agentes_jev.dispatcher import DispatcherMultiagenteJEV
 from uasi_v5.auditoria.ledger import LedgerAuditoriaCriptografica
 from uasi_v5.auditoria.merkle_ots import OTS_DISPONIBLE, OTS_ERROR_IMPORT, MerkleOpenTimestampsManager
-from uasi_v5.core.config import BITCOIN_NETWORK, OTS_CALENDARS, PATH_WORKSPACE, SECRET_JWT_KEY, UASI_ENV, VERSION_UASI
+from uasi_v5.core.config import (
+    BITCOIN_NETWORK,
+    JEV_MAX_WORKERS,
+    OTS_CALENDARS,
+    PATH_WORKSPACE,
+    SECRET_JWT_KEY,
+    UASI_ENV,
+    VERSION_UASI,
+)
 from uasi_v5.core.utilidades import ahora_utc
 from uasi_v5.orquestacion.orquestador import OrquestadorSemanticoUASI
 from uasi_v5.persistencia.almacen_modelos import ruta_modelo, verificar_checksum
@@ -71,3 +81,7 @@ def estado_salud_detallado() -> Dict[str, Any]:
 
 
 orquestador = OrquestadorSemanticoUASI(ledger_ref=ledger, guardian_ref=guardian, salud=estado_salud_detallado)
+
+dispatcher_jev = DispatcherMultiagenteJEV(
+    max_workers=JEV_MAX_WORKERS, verificar_ledger=ledger.verificar_integridad, salud=estado_salud_detallado
+)

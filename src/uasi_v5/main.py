@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 
+from uasi_v5.agentes_jev import REGISTRO_AGENTES, AgenteJEVBase, DispatcherMultiagenteJEV
 from uasi_v5.api.app import crear_app, lifespan
 from uasi_v5.api.rutas.v1 import AGENTES_V1
 from uasi_v5.auditoria.ledger import LedgerAuditoriaCriptografica
@@ -34,6 +35,8 @@ from uasi_v5.core.config import (
     ARCHIVO_LEDGER,
     BITCOIN_NETWORK,
     ESPLORA_API_URL,
+    JEV_HMAC_KEY,
+    JEV_MAX_WORKERS,
     JWT_ALGORITHM,
     JWT_EXP_MINUTES,
     JWT_ISSUER,
@@ -66,6 +69,7 @@ from uasi_v5.core.excepciones import (
 )
 from uasi_v5.core.registro import logger
 from uasi_v5.core.utilidades import ahora_utc, json_canonico, sha256_hex
+from uasi_v5.esquemas.jev import LenguajeDestino, RespuestaJEV, ResultadoAgenteJEV, SolicitudJEV, TipoTareaJEV
 from uasi_v5.esquemas.solicitudes import (
     FilaNumerica,
     SolicitudMaestraV5,
@@ -99,9 +103,11 @@ from uasi_v5.persistencia.almacen_modelos import (
 )
 from uasi_v5.seguridad.autenticacion import api_key_header, emitir_token, require_auth
 from uasi_v5.seguridad.gobernanza import GuardiánGobernanzaSeguridad, guardian
+from uasi_v5.seguridad.jev_firma import firmar_jev, jev_configurado, verificar_firma_jev
 from uasi_v5.seguridad.limites import LimiteTamanoPayloadMiddleware, limiter
 from uasi_v5.servicios import (
     MODELOS_ESPERADOS,
+    dispatcher_jev,
     estado_salud_detallado,
     ledger,
     merkle_manager,
@@ -139,6 +145,10 @@ __all__ = [
     # Auditoría
     "LedgerAuditoriaCriptografica", "MerkleOpenTimestampsManager", "ledger", "merkle_manager",
     "MODELOS_ESPERADOS", "estado_salud_detallado",
+    # JEV (JEV → UASI multiagente → JEV)
+    "JEV_MAX_WORKERS", "JEV_HMAC_KEY", "TipoTareaJEV", "LenguajeDestino", "SolicitudJEV", "RespuestaJEV",
+    "ResultadoAgenteJEV", "AgenteJEVBase", "DispatcherMultiagenteJEV", "REGISTRO_AGENTES", "dispatcher_jev",
+    "firmar_jev", "verificar_firma_jev", "jev_configurado",
 ]
 
 
