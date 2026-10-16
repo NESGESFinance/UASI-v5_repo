@@ -1,9 +1,9 @@
 # UASI v5 Enterprise Production
 
-![versión](https://img.shields.io/badge/versión-5.1.0--enterprise-blue)
+![versión](https://img.shields.io/badge/versión-5.2.0--enterprise-blue)
 ![estado](https://img.shields.io/badge/estado-producción-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
-![tests](https://img.shields.io/badge/tests-17%20passed%20%7C%201%20skipped-success)
+![tests](https://img.shields.io/badge/tests-29%20passed%20%7C%201%20skipped-success)
 ![bitcoin](https://img.shields.io/badge/anclaje-Bitcoin%20L1%20·%20OpenTimestamps-F7931A?logo=bitcoin&logoColor=white)
 ![licencia](https://img.shields.io/badge/licencia-MIT-lightgrey)
 
@@ -14,8 +14,11 @@ JWT y todas las peticiones pasan por un guardián de gobernanza. Cada operación
 **ledger criptográfico hash-encadenado**, cuya raíz de Merkle diaria se **ancla en Bitcoin L1** mediante
 OpenTimestamps.
 
-> El código completo del servicio está en un único módulo, [`src/uasi_v5/main.py`](src/uasi_v5/main.py)
-> (1999 líneas), que es una copia exacta de `uasi_v5_enterprise_production.py`.
+> Desde la v5.2.0 el servicio es un **paquete modular por capas** en [`src/uasi_v5/`](src/uasi_v5/)
+> (`core`, `esquemas`, `seguridad`, `persistencia`, `ml`, `orquestacion`, `agentes_jev`, `auditoria`, `api`).
+> [`src/uasi_v5/main.py`](src/uasi_v5/main.py) es una fachada que reexporta la API pública, de modo que
+> `uasi_v5.main:app` y `from uasi_v5.main import ...` siguen funcionando. Incluye la nueva
+> [capa multiagente JEV](#capa-multiagente-jev).
 
 ---
 
@@ -27,10 +30,11 @@ OpenTimestamps.
 4. [Requisitos](#requisitos)
 5. [Instalación en 5 pasos](#instalación-en-5-pasos)
 6. [Uso de la API (curl)](#uso-de-la-api-curl)
-7. [Anclaje en Bitcoin L1](#anclaje-en-bitcoin-l1)
-8. [Estructura del repositorio](#estructura-del-repositorio)
-9. [Desarrollo, tests y Docker](#desarrollo-tests-y-docker)
-10. [Documentación adicional](#documentación-adicional)
+7. [Capa multiagente JEV](#capa-multiagente-jev)
+8. [Anclaje en Bitcoin L1](#anclaje-en-bitcoin-l1)
+9. [Estructura del repositorio](#estructura-del-repositorio)
+10. [Desarrollo, tests y Docker](#desarrollo-tests-y-docker)
+11. [Documentación adicional](#documentación-adicional)
 
 ---
 
@@ -60,6 +64,9 @@ OpenTimestamps.
                                                 ▼
           MerkleOpenTimestampsManager → raíz de Merkle diaria → calendarios OTS → Bitcoin (OP_RETURN)
 ```
+
+Además, `POST /api/v5/jev-dispatch` (JWT + firma HMAC JEV) alimenta el `DispatcherMultiagenteJEV`; ver
+[Capa multiagente JEV](#capa-multiagente-jev).
 
 Hay una descripción más detallada en [`docs/arquitectura.md`](docs/arquitectura.md).
 
@@ -220,6 +227,66 @@ curl -s "$API/api/v5/verify-ots/$(date -u +%F)" -H "Authorization: Bearer $TOKEN
 La referencia completa (headers, bodies de request y de response y códigos de error) está en
 [`docs/api_reference.md`](docs/api_reference.md).
 
+## Capa multiagente JEV
+
+**JEV → UASI (multiagente especializado) → JEV.** JEV emite datos exactos en una `SolicitudJEV` firmada
+con HMAC-SHA256. UASI verifica el JWT y la firma, reparte la tarea en paralelo entre agentes de
+`python`, `typescript`, `javascript`, `solidity`, `rust`, `go` y `java`, registra el evento
+`DISPATCH_JEV` en el ledger y devuelve una `RespuestaJEV` firmada. Cada agente es determinista y **no
+ejecuta código**: devuelve la inferencia de tipos de `datos`, el código binding (interface TS, struct
+Solidity/Rust/Go, clase Java, dataclass Python, typedef JSDoc) y un resumen de la tarea.
+
+| Código | Motivo |
+|---|---|
+| 200 | `estado` = `exito`, `error_parcial` o `error` (los agentes están aislados entre sí) |
+| 401 | JWT ausente o inválido, o firma JEV inválida |
+| 422 | Esquema inválido (por ejemplo, un lenguaje no soportado) |
+| 503 | `JEV_HMAC_KEY` (o `SECRET_JWT_KEY`) no configurada |
+
+Tipos de tarea: `INFERENCIA_MULTILENGUAJE`, `ANALISIS_DATOS`, `EVALUACION_MODELO`, `AUDITORIA_LEDGER`,
+`SINCRONIZACION_RWA`, `VALIDACION_CRUZADA` y `GENERACION_BINDINGS`.
+
+**Cómo firma JEV la solicitud (Python):** HMAC-SHA256 del JSON canónico del cuerpo **sin** `firma_hmac`.
+```python
+import hashlib, hmac, json, os, requests
+
+cuerpo = {
+    "id_jev": "jev-2026-10-16-0001",
+    "tipo_tarea": "SINCRONIZACION_RWA",
+    "lenguajes_destino": ["solidity", "typescript", "rust"],
+    "datos": {"red": "bitcoin", "activos": [{"id": "RWA-EC-01", "valor": 1250.5}]},
+    "metadatos": {"origen": "jev"},
+}
+canonico = json.dumps(cuerpo, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+cuerpo["firma_hmac"] = hmac.new(os.environ["JEV_HMAC_KEY"].encode(), canonico.encode(), hashlib.sha256).hexdigest()
+
+r = requests.post(f"{os.environ['API']}/api/v5/jev-dispatch", json=cuerpo,
+                  headers={"Authorization": f"Bearer {os.environ['TOKEN']}"}, timeout=30)
+respuesta = r.json()
+
+# Verificación de la respuesta: misma regla, sin el campo firma_respuesta.
+firma = respuesta.pop("firma_respuesta")
+esperada = hmac.new(os.environ["JEV_HMAC_KEY"].encode(),
+                    json.dumps(respuesta, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(),
+                    hashlib.sha256).hexdigest()
+assert hmac.compare_digest(firma, esperada)
+```
+
+**Con curl** (el JSON firmado debe enviarse tal cual se firmó):
+```bash
+CUERPO='{"datos":{"precios":[1.5,2,3.25]},"id_jev":"jev-1","lenguajes_destino":["go","java"],"tipo_tarea":"ANALISIS_DATOS"}'
+FIRMA=$(printf '%s' "$CUERPO" | openssl dgst -sha256 -hmac "$JEV_HMAC_KEY" -r | cut -d' ' -f1)
+curl -s -X POST "$API/api/v5/jev-dispatch" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "${CUERPO%\}},\"firma_hmac\":\"$FIRMA\"}"
+
+curl -s "$API/api/v5/jev/agentes" -H "Authorization: Bearer $TOKEN"   # lenguajes y tipos de tarea
+```
+> En el ejemplo curl, `CUERPO` ya está en forma canónica (claves ordenadas y sin espacios), por eso su
+> HMAC coincide con el que calcula UASI.
+
+Detalle del flujo, de la tabla de tipos por lenguaje y de la firma: [`docs/arquitectura.md`](docs/arquitectura.md#7-capa-multiagente-jev-jev--uasi--jev).
+
 ## Anclaje en Bitcoin L1
 
 El ledger hash-encadenado demuestra que **nadie ha alterado un bloque sin romper la cadena**, pero quien
@@ -259,11 +326,22 @@ uasi_v5_repo/
 ├── .gitignore · .env.example · requirements.txt · requirements-dev.txt · Makefile · pyproject.toml
 ├── src/uasi_v5/
 │   ├── __init__.py          # versión y exports perezosos
-│   └── main.py              # servicio completo (copia exacta del módulo de producción)
+│   ├── main.py              # fachada: app + reexportaciones (__all__)
+│   ├── servicios.py         # singletons: ledger, merkle_manager, orquestador, dispatcher_jev
+│   ├── core/                # config, excepciones, registro (log JSON), utilidades
+│   ├── esquemas/            # solicitudes v1/v5 · jev.py (SolicitudJEV / RespuestaJEV)
+│   ├── seguridad/           # JWT, gobernanza, límites, jev_firma.py (HMAC-SHA256)
+│   ├── persistencia/        # almacén de modelos (checksum/HMAC + locks)
+│   ├── ml/                  # evaluación + agentes ML (legacy, profundo, evolutivo, ensamblado, streaming, metacognitivo)
+│   ├── orquestacion/        # OrquestadorSemanticoUASI
+│   ├── agentes_jev/         # base, dispatcher y 7 agentes por lenguaje
+│   ├── auditoria/           # ledger hash-encadenado + Merkle/OpenTimestamps
+│   └── api/                 # app (lifespan), manejadores y rutas (auth, v1, v5, jev, auditoría, salud)
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py          # path, alias del módulo histórico y fixtures
-│   └── test_uasi_v5.py      # 18 tests (copia exacta)
+│   ├── test_uasi_v5.py      # 18 tests (suite original)
+│   └── test_jev.py          # 12 tests de la capa JEV
 ├── scripts/
 │   ├── generar_secretos.sh
 │   ├── anclar_ledger_bitcoin.sh
@@ -299,7 +377,7 @@ make help         # lista todos los targets
 - [`docs/arquitectura.md`](docs/arquitectura.md): componentes, flujos y decisiones de diseño.
 - [`docs/api_reference.md`](docs/api_reference.md): referencia completa de la API.
 - [`docs/bitcoin_opentimestamps.md`](docs/bitcoin_opentimestamps.md): OpenTimestamps, OP_RETURN y verificación a largo plazo.
-- [`CHANGELOG.md`](CHANGELOG.md): historial de versiones (de la v1.0 a la v5.1.0-enterprise).
+- [`CHANGELOG.md`](CHANGELOG.md): historial de versiones (de la v1.0 a la v5.2.0-enterprise).
 
 ## Licencia
 

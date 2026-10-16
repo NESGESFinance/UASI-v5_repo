@@ -6,6 +6,34 @@ sigue [Versionado Semántico](https://semver.org/lang/es/).
 
 ---
 
+## [5.2.0-enterprise] - 2026-10-16
+
+Arquitectura modular por capas y nueva capa multiagente **JEV → UASI → JEV**. Es compatible con la
+v5.1.0: los endpoints existentes y `from uasi_v5.main import ...` se mantienen.
+
+### Cambiado
+- El antiguo `main.py` único se divide en el paquete `src/uasi_v5/` con subpaquetes `core`, `esquemas`,
+  `seguridad`, `persistencia`, `ml`, `orquestacion`, `auditoria`, `agentes_jev` y `api`. Los singletons
+  se cablean en `servicios.py`; `main.py` queda como fachada de reexportación.
+- Versión 5.2.0-enterprise en `pyproject.toml`, `__init__`, configuración, Makefile y Docker.
+
+### Añadido
+- **Capa JEV**: `POST /api/v5/jev-dispatch` recibe una `SolicitudJEV` firmada, la despacha en paralelo a
+  agentes especializados (`python`, `typescript`, `javascript`, `solidity`, `rust`, `go`, `java`) y devuelve
+  una `RespuestaJEV` firmada con inferencia de tipos, código binding y resumen por lenguaje.
+- `GET /api/v5/jev/agentes`: lenguajes y tipos de tarea disponibles.
+- `DispatcherMultiagenteJEV`: `ThreadPoolExecutor` (`JEV_MAX_WORKERS`), aislamiento de errores por agente,
+  estado global `exito` / `error_parcial` / `error` e inyección de la integridad del ledger
+  (`AUDITORIA_LEDGER`) y del health check (`EVALUACION_MODELO`).
+- Agentes deterministas que **no ejecutan código**; `hash_resultado` = SHA-256 del JSON canónico.
+- Evento de ledger `DISPATCH_JEV` con los hashes de datos y de resultados.
+- Variables `JEV_HMAC_KEY` y `JEV_MAX_WORKERS`; aviso al arrancar si falta `JEV_HMAC_KEY`.
+- `tests/test_jev.py` (12 tests).
+
+### Seguridad
+- `seguridad/jev_firma.py`: HMAC-SHA256 sobre el JSON canónico sin campos de firma, comparación en tiempo
+  constante (`hmac.compare_digest`) y fail-closed: sin clave → 503, firma inválida → 401. Además del JWT.
+
 ## [5.1.0-enterprise] - 2026-10-12
 
 Revisión correctiva **P1 + P2 + P3**, basada en el informe técnico ejecutivo sobre la v5.0.0.
@@ -112,6 +140,7 @@ Revisión correctiva **P1 + P2 + P3**, basada en el informe técnico ejecutivo s
 - Endpoint `POST /api/v1/procesar`.
 - `GuardiánAuditoríaLegacy`: registro en JSON plano, sin encadenamiento hash.
 
+[5.2.0-enterprise]: #520-enterprise---2026-10-16
 [5.1.0-enterprise]: #510-enterprise---2026-10-12
 [5.0.0-ENTERPRISE-UNIFIED]: #500-enterprise-unified
 [4.0]: #40
