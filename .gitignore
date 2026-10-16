@@ -1,0 +1,50 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+.eggs/
+build/
+dist/
+wheels/
+
+# --- Entornos virtuales ---
+.venv/
+venv/
+env/
+ENV/
+
+# --- Secretos y configuración local ---
+.env
+.env.*
+!.env.example
+
+# --- Artefactos de modelos / binarios ---
+*.pkl
+*.pickle
+*.joblib
+*.joblib.sha256
+*.bin
+*.lock
+
+# --- Workspace de ejecución (modelos, ledger, pruebas OTS) ---
+uasi_workspace/
+workspace/
+data/
+*.ots
+
+# --- Herramientas ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# --- IDE / SO ---
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
