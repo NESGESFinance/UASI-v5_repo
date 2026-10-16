@@ -29,10 +29,24 @@ v5.1.0: los endpoints existentes y `from uasi_v5.main import ...` se mantienen.
 - Evento de ledger `DISPATCH_JEV` con los hashes de datos y de resultados.
 - Variables `JEV_HMAC_KEY` y `JEV_MAX_WORKERS`; aviso al arrancar si falta `JEV_HMAC_KEY`.
 - `tests/test_jev.py` (12 tests).
+- **Automatización JEV:** `POST /api/v5/jev-dispatch/lote` (lotes de hasta `JEV_LOTE_MAX` solicitudes, cada una
+  firmada y registrada por separado) y `GET /api/v5/jev/metricas` (contadores por lenguaje, tarea, rechazos,
+  caché y callbacks).
+- **Optimización JEV:** caché determinista LRU + TTL de resultados de agentes (`JEV_CACHE_MAX`, `JEV_CACHE_TTL`;
+  campo `desde_cache`), excluyendo `AUDITORIA_LEDGER` y `EVALUACION_MODELO`.
+- **Idempotencia** por `id_solicitud`: un reintento idéntico devuelve la misma respuesta firmada sin re-ejecutar.
+- **Callback automático** opcional a JEV (`metadatos.url_callback`) con reintentos, backoff y evento `CALLBACK_JEV`.
+- SDK de referencia `clientes/python/jev_cliente.py` (stdlib) y `clientes/typescript/jevCliente.ts` (Node ≥ 18),
+  compatibles byte a byte con el JSON canónico del servidor.
+- `tests/test_jev_automatizacion.py` (17 tests). Total: 46 pasan, 1 omitido (requiere red).
 
 ### Seguridad
 - `seguridad/jev_firma.py`: HMAC-SHA256 sobre el JSON canónico sin campos de firma, comparación en tiempo
   constante (`hmac.compare_digest`) y fail-closed: sin clave → 503, firma inválida → 401. Además del JWT.
+- `seguridad/jev_replay.py`: ventana temporal del `timestamp` (`JEV_VENTANA_SEGUNDOS`, 401 fuera de ventana) y
+  409 si un `id_solicitud` se reutiliza con otro cuerpo.
+- Callbacks deny-by-default contra SSRF: lista blanca `JEV_CALLBACK_HOSTS`, solo `https` (salvo localhost),
+  sin credenciales en la URL y sin redirecciones.
 
 ## [5.1.0-enterprise] - 2026-10-12
 

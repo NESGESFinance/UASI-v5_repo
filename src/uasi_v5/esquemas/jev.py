@@ -48,6 +48,7 @@ class ResultadoAgenteJEV(BaseModel):
     mensaje_error: Optional[str] = None
     duracion_ms: float = 0.0
     hash_resultado: str = ""       # SHA-256 del JSON canónico de datos_resultado
+    desde_cache: bool = False      # True si el resultado se sirvió desde la caché determinista
 
 
 # ---------------------------------------------------------------------------
@@ -135,3 +136,18 @@ class RespuestaJEV(BaseModel):
     duracion_total_ms: float = 0.0
     version_uasi: str = ""
     errores_globales: List[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Lote de solicitudes JEV → UASI
+# ---------------------------------------------------------------------------
+class LoteJEV(BaseModel):
+    """Lote de solicitudes JEV. Cada elemento lleva su propia `firma_hmac`.
+
+    Los elementos se validan uno a uno (un elemento inválido no invalida el lote);
+    el tamaño máximo se controla con `JEV_LOTE_MAX` en tiempo de ejecución.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    solicitudes: List[Dict[str, Any]] = Field(..., min_length=1)

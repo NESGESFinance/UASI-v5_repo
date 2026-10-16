@@ -27,6 +27,8 @@ from __future__ import annotations
 import os
 
 from uasi_v5.agentes_jev import REGISTRO_AGENTES, AgenteJEVBase, DispatcherMultiagenteJEV
+from uasi_v5.agentes_jev.automatizacion import TAREAS_NO_CACHEABLES, CacheResultadosJEV, MetricasJEV
+from uasi_v5.agentes_jev.callback import enviar_callback, validar_url_callback
 from uasi_v5.api.app import crear_app, lifespan
 from uasi_v5.api.rutas.v1 import AGENTES_V1
 from uasi_v5.auditoria.ledger import LedgerAuditoriaCriptografica
@@ -69,7 +71,7 @@ from uasi_v5.core.excepciones import (
 )
 from uasi_v5.core.registro import logger
 from uasi_v5.core.utilidades import ahora_utc, json_canonico, sha256_hex
-from uasi_v5.esquemas.jev import LenguajeDestino, RespuestaJEV, ResultadoAgenteJEV, SolicitudJEV, TipoTareaJEV
+from uasi_v5.esquemas.jev import LenguajeDestino, LoteJEV, RespuestaJEV, ResultadoAgenteJEV, SolicitudJEV, TipoTareaJEV
 from uasi_v5.esquemas.solicitudes import (
     FilaNumerica,
     SolicitudMaestraV5,
@@ -104,13 +106,17 @@ from uasi_v5.persistencia.almacen_modelos import (
 from uasi_v5.seguridad.autenticacion import api_key_header, emitir_token, require_auth
 from uasi_v5.seguridad.gobernanza import GuardiánGobernanzaSeguridad, guardian
 from uasi_v5.seguridad.jev_firma import firmar_jev, jev_configurado, verificar_firma_jev
+from uasi_v5.seguridad.jev_replay import RegistroIdempotenciaJEV, verificar_ventana
 from uasi_v5.seguridad.limites import LimiteTamanoPayloadMiddleware, limiter
 from uasi_v5.servicios import (
     MODELOS_ESPERADOS,
+    cache_jev,
     dispatcher_jev,
     estado_salud_detallado,
+    idempotencia_jev,
     ledger,
     merkle_manager,
+    metricas_jev,
     orquestador,
 )
 
@@ -149,6 +155,9 @@ __all__ = [
     "JEV_MAX_WORKERS", "JEV_HMAC_KEY", "TipoTareaJEV", "LenguajeDestino", "SolicitudJEV", "RespuestaJEV",
     "ResultadoAgenteJEV", "AgenteJEVBase", "DispatcherMultiagenteJEV", "REGISTRO_AGENTES", "dispatcher_jev",
     "firmar_jev", "verificar_firma_jev", "jev_configurado",
+    # JEV: automatización y optimización
+    "LoteJEV", "CacheResultadosJEV", "MetricasJEV", "TAREAS_NO_CACHEABLES", "RegistroIdempotenciaJEV",
+    "verificar_ventana", "enviar_callback", "validar_url_callback", "cache_jev", "metricas_jev", "idempotencia_jev",
 ]
 
 

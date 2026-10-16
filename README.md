@@ -3,7 +3,7 @@
 ![versión](https://img.shields.io/badge/versión-5.2.0--enterprise-blue)
 ![estado](https://img.shields.io/badge/estado-producción-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
-![tests](https://img.shields.io/badge/tests-29%20passed%20%7C%201%20skipped-success)
+![tests](https://img.shields.io/badge/tests-46%20passed%20%7C%201%20skipped-success)
 ![bitcoin](https://img.shields.io/badge/anclaje-Bitcoin%20L1%20·%20OpenTimestamps-F7931A?logo=bitcoin&logoColor=white)
 ![licencia](https://img.shields.io/badge/licencia-MIT-lightgrey)
 
@@ -287,6 +287,44 @@ curl -s "$API/api/v5/jev/agentes" -H "Authorization: Bearer $TOKEN"   # lenguaje
 
 Detalle del flujo, de la tabla de tipos por lenguaje y de la firma: [`docs/arquitectura.md`](docs/arquitectura.md#7-capa-multiagente-jev-jev--uasi--jev).
 
+### Automatización, optimización y SDK
+
+| Endpoint | Uso |
+|---|---|
+| `POST /api/v5/jev-dispatch` | Una solicitud firmada → una respuesta firmada (con anti-replay, idempotencia y caché). |
+| `POST /api/v5/jev-dispatch/lote` | `{"solicitudes": [...]}`, hasta `JEV_LOTE_MAX` (20), cada una con su firma. |
+| `GET /api/v5/jev/agentes` | Lenguajes, tipos de tarea y configuración efectiva. |
+| `GET /api/v5/jev/metricas` | Contadores por lenguaje y tarea, rechazos, caché y callbacks. |
+
+- **Anti-replay:** si JEV envía `timestamp`, debe estar dentro de ±300 s (`JEV_VENTANA_SEGUNDOS`).
+- **Idempotencia:** si JEV envía `id_solicitud`, un reintento idéntico devuelve la misma respuesta
+  (`X-JEV-Idempotente: true`) y el mismo id con otro cuerpo devuelve 409.
+- **Caché determinista:** resultados repetidos se sirven con `desde_cache: true` (no aplica a
+  `AUDITORIA_LEDGER` ni `EVALUACION_MODELO`).
+- **Callback automático:** con `metadatos.url_callback` y el host en `JEV_CALLBACK_HOSTS`, UASI envía
+  la respuesta firmada a JEV en segundo plano y lo registra como `CALLBACK_JEV`.
+
+**SDK Python (solo stdlib)** — `clientes/python/jev_cliente.py`:
+
+```python
+from jev_cliente import ClienteJEV, construir_solicitud
+
+cliente = ClienteJEV("http://localhost:8000", clave_hmac=os.environ["JEV_HMAC_KEY"], token_jwt=TOKEN)
+r = cliente.despachar("SINCRONIZACION_RWA", ["solidity", "typescript"],
+                      {"activo_id": "NGF-1", "valor": "1250.50"}, id_solicitud="rwa-0001")
+print(r["estado"], r["resultados_por_lenguaje"]["solidity"]["datos_resultado"]["codigo_binding"])
+```
+
+**SDK TypeScript (Node ≥ 18)** — `clientes/typescript/jevCliente.ts`:
+
+```ts
+import { ClienteJEV } from "./jevCliente";
+const cliente = new ClienteJEV("http://localhost:8000", process.env.JEV_HMAC_KEY!, token);
+const r = await cliente.despachar("GENERACION_BINDINGS", ["rust", "go"], { activo_id: "NGF-1" });
+```
+
+Ambos clientes firman la solicitud y **rechazan cualquier respuesta cuya firma no sea válida**.
+
 ## Anclaje en Bitcoin L1
 
 El ledger hash-encadenado demuestra que **nadie ha alterado un bloque sin romper la cadena**, pero quien
@@ -341,7 +379,11 @@ uasi_v5_repo/
 │   ├── __init__.py
 │   ├── conftest.py          # path, alias del módulo histórico y fixtures
 │   ├── test_uasi_v5.py      # 18 tests (suite original)
-│   └── test_jev.py          # 12 tests de la capa JEV
+│   ├── test_jev.py          # 12 tests de la capa JEV
+│   └── test_jev_automatizacion.py  # 17 tests: anti-replay, caché, lotes, métricas, callbacks, SDK
+├── clientes/
+│   ├── python/jev_cliente.py       # SDK de referencia JEV (stdlib)
+│   └── typescript/jevCliente.ts    # SDK de referencia JEV (Node ≥ 18)
 ├── scripts/
 │   ├── generar_secretos.sh
 │   ├── anclar_ledger_bitcoin.sh

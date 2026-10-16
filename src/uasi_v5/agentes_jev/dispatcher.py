@@ -13,6 +13,7 @@ from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+from uasi_v5.agentes_jev.automatizacion import TAREAS_NO_CACHEABLES, CacheResultadosJEV, clave_cache
 from uasi_v5.agentes_jev.base import CLAVE_CONTEXTO, AgenteJEVBase, ejecutar_agente
 from uasi_v5.agentes_jev.go_agente import AgenteGo
 from uasi_v5.agentes_jev.java_agente import AgenteJava
@@ -40,11 +41,20 @@ class DispatcherMultiagenteJEV:
         verificar_ledger: ProveedorContexto | None = None,
         salud: ProveedorContexto | None = None,
         registro: dict[str, type[AgenteJEVBase]] | None = None,
+        cache: CacheResultadosJEV | None = None,
     ) -> None:
         self.max_workers = max(1, int(max_workers))
         self._verificar_ledger = verificar_ledger
         self._salud = salud
         self._registro: dict[str, type[AgenteJEVBase]] = dict(registro if registro is not None else REGISTRO_AGENTES)
+        self.cache = cache  # None ⇒ sin caché
+
+    def _clave(self, lang: str, tipo_tarea: str, datos: dict[str, Any]) -> str | None:
+        """Clave de caché o None si la tarea depende del estado vivo de UASI."""
+        if self.cache is None or not self.cache.activa or tipo_tarea in TAREAS_NO_CACHEABLES:
+            return None
+        clase = self._registro[lang]
+        return clave_cache(f"{clase.__module__}.{clase.__qualname__}", tipo_tarea, datos)
 
     @property
     def lenguajes(self) -> list[str]:
@@ -93,14 +103,24 @@ class DispatcherMultiagenteJEV:
                     lenguaje=lang, estado="error", mensaje_error=f"Lenguaje no soportado: {lang!r}"
                 )
 
-        if conocidos:
-            with ThreadPoolExecutor(max_workers=min(self.max_workers, len(conocidos)),
+        claves = {lang: self._clave(lang, tipo_tarea, datos) for lang in conocidos}
+        pendientes: list[str] = []
+        for lang in conocidos:
+            clave = claves[lang]
+            cacheado = self.cache.obtener(clave) if (self.cache is not None and clave) else None
+            if cacheado is not None:
+                resultados[lang] = cacheado
+            else:
+                pendientes.append(lang)
+
+        if pendientes:
+            with ThreadPoolExecutor(max_workers=min(self.max_workers, len(pendientes)),
                                     thread_name_prefix="jev-agente") as pool:
                 futuros = {
                     lang: pool.submit(
                         ejecutar_agente, self._registro[lang](), tipo_tarea, copy.deepcopy(datos), copy.deepcopy(meta)
                     )
-                    for lang in conocidos
+                    for lang in pendientes
                 }
                 for lang, futuro in futuros.items():
                     try:
@@ -109,6 +129,9 @@ class DispatcherMultiagenteJEV:
                         resultados[lang] = ResultadoAgenteJEV(
                             lenguaje=lang, estado="error", mensaje_error=f"{type(exc).__name__}: {exc}"[:500]
                         )
+                    clave = claves[lang]
+                    if self.cache is not None and clave:
+                        self.cache.guardar(clave, resultados[lang])
 
         ordenados = {lang: resultados[lang] for lang in pedidos}
         exitos = sum(1 for r in ordenados.values() if r.estado == "exito")

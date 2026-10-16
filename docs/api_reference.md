@@ -1,4 +1,4 @@
-# Referencia de la API · UASI v5 Enterprise (5.1.0-enterprise)
+# Referencia de la API · UASI v5 Enterprise (5.2.0-enterprise)
 
 - **URL base:** `http://<host>:8000`. Puerto por defecto: `PORT=8000`.
 - **Formato:** JSON (`Content-Type: application/json`), con fechas en ISO 8601 UTC.
@@ -19,6 +19,10 @@
 | 6 | GET | [`/api/v5/cryptographic-ledger`](#6-get-apiv5cryptographic-ledger) | Bearer | Ledger paginado con verificación opcional. |
 | 7 | GET | [`/api/v5/merkle-anchor`](#7-get-apiv5merkle-anchor) | Bearer | Raíz de Merkle diaria y anclaje en Bitcoin vía OTS. |
 | 8 | GET | [`/api/v5/verify-ots/{fecha}`](#8-get-apiv5verify-otsfecha) | Bearer | Verificación de la prueba `.ots`. |
+| 9 | POST | [`/api/v5/jev-dispatch`](#9-post-apiv5jev-dispatch) | Bearer + HMAC JEV | Despacho multiagente JEV. |
+| 10 | POST | [`/api/v5/jev-dispatch/lote`](#10-post-apiv5jev-dispatchlote) | Bearer + HMAC JEV | Lote de solicitudes JEV. |
+| 11 | GET | [`/api/v5/jev/agentes`](#11-get-apiv5jevagentes) | Bearer | Lenguajes, tareas y configuración JEV. |
+| 12 | GET | [`/api/v5/jev/metricas`](#12-get-apiv5jevmetricas) | Bearer | Métricas de la capa JEV. |
 
 ---
 
@@ -538,3 +542,45 @@ incluye `{"tipo": "bitcoin_block_header", "altura_bloque": N, "merkle_root_bloqu
 > (por ejemplo, `2020-13-45`) devuelve **500**, cuando lo esperable sería 422, porque `datetime.strptime`
 > lanza un `ValueError` genérico. No afecta a la seguridad: no se accede a ninguna ruta. Está pendiente
 > de corregir en `main.py`.
+
+---
+
+## 9. POST `/api/v5/jev-dispatch`
+
+Cuerpo `SolicitudJEV` firmado por JEV (`firma_hmac` = HMAC-SHA256 del JSON canónico sin ese campo):
+
+```json
+{"id_jev": "jev-001", "version_jev": "1.0", "tipo_tarea": "GENERACION_BINDINGS",
+ "lenguajes_destino": ["typescript", "solidity"], "datos": {"activo_id": "NGF-1"},
+ "metadatos": {"origen": "jev", "url_callback": "https://jev.ejemplo.com/uasi"},
+ "id_solicitud": "rwa-0001", "timestamp": "2026-10-16T12:00:00+00:00", "firma_hmac": "<64 hex>"}
+```
+
+- `tipo_tarea`: `INFERENCIA_MULTILENGUAJE`, `ANALISIS_DATOS`, `EVALUACION_MODELO`, `AUDITORIA_LEDGER`,
+  `SINCRONIZACION_RWA`, `VALIDACION_CRUZADA`, `GENERACION_BINDINGS`.
+- `lenguajes_destino`: `python`, `typescript`, `javascript`, `solidity`, `rust`, `go`, `java`.
+- `id_solicitud` y `timestamp` son opcionales; si se envían activan idempotencia y anti-replay.
+- **Respuesta 200** `RespuestaJEV`: `id_jev`, `id_ejecucion`, `estado` (`exito`/`error_parcial`/`error`),
+  `resultados_por_lenguaje.{lang}` (`estado`, `datos_resultado` con `inferencia_tipos`, `codigo_binding`,
+  `resumen`; `hash_resultado`; `desde_cache`), `bloque_ledger`, `errores_globales` y `firma_respuesta`.
+- **Cabeceras:** `X-JEV-Idempotente: true|false`; `X-JEV-Callback: programado | rechazado: motivo`.
+- **Errores:** `401` (JWT, firma o ventana temporal), `403` (gobernanza de metadatos), `409` (`id_solicitud`
+  reutilizado con otro cuerpo), `422` (validación), `503` (`JEV_HMAC_KEY` ausente).
+
+## 10. POST `/api/v5/jev-dispatch/lote`
+
+Cuerpo `{"solicitudes": [SolicitudJEV, ...]}` (1 a `JEV_LOTE_MAX`, por defecto 20; cada una firmada).
+Respuesta 200: `total`, `exitosas`, `fallidas`, `resultados[]` (`indice`, `id_jev`, `codigo_http`,
+`respuesta` firmada o `error`, `idempotente`, `callback`) y `firma_respuesta` sobre todo el resumen.
+Errores globales: `422` (lote vacío o mayor que `JEV_LOTE_MAX`) y `503` (sin `JEV_HMAC_KEY`).
+
+## 11. GET `/api/v5/jev/agentes`
+
+Devuelve `lenguajes`, `tipos_tarea`, `tareas_no_cacheables`, `max_workers`, `jev_configurado`,
+`ventana_segundos`, `lote_max` y `callbacks_habilitados`.
+
+## 12. GET `/api/v5/jev/metricas`
+
+Devuelve `por_lenguaje` (`ejecuciones`, `exitos`, `errores`, `aciertos_cache`, `duracion_media_ms`),
+`por_tipo_tarea`, `rechazos` (`firma_invalida`, `sin_configurar`, `fuera_de_ventana`, `replay_conflicto`,
+`validacion`, `gobernanza`), `respuestas_idempotentes`, `callbacks` y `cache`. Las métricas son por proceso.

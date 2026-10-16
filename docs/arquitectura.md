@@ -217,6 +217,47 @@ firma   = HMAC-SHA256(JEV_HMAC_KEY, mensaje.encode("utf-8")).hexdigest()     # 6
 - **Respuesta**: UASI firma la respuesta sin `firma_respuesta`; JEV la verifica igual.
 - **Fail-closed**: `JEV_HMAC_KEY` se lee en cada petición. Sin clave → 503; firma ausente o inválida → 401.
 
+### 7.3 Automatización y optimización
+
+Pipeline completo de cada solicitud en `api/rutas/jev.py`:
+
+```text
+JWT ─► firma HMAC (503/401) ─► ventana temporal (401) ─► gobernanza de metadatos (403)
+    ─► idempotencia por id_solicitud (respuesta previa | 409) ─► dispatcher (+ caché determinista)
+    ─► ledger DISPATCH_JEV ─► RespuestaJEV firmada ─► callback opcional en segundo plano (CALLBACK_JEV)
+```
+
+| Mecanismo | Módulo | Comportamiento |
+|---|---|---|
+| **Anti-replay** | `seguridad/jev_replay.py` | Si JEV envía `timestamp`, debe estar dentro de ±`JEV_VENTANA_SEGUNDOS`; si no → 401. Sin zona horaria se interpreta como UTC. |
+| **Idempotencia** | `seguridad/jev_replay.py` | Si JEV envía `id_solicitud`: un reintento idéntico devuelve la misma respuesta firmada (cabecera `X-JEV-Idempotente: true`, sin re-ejecutar ni nuevo bloque de ledger); mismo id con otro cuerpo → 409. |
+| **Caché determinista** | `agentes_jev/automatizacion.py` | LRU + TTL por (agente, tarea, datos). Los agentes son deterministas, así que el resultado reutilizado es idéntico (`hash_resultado` igual) y se marca con `desde_cache: true`. `AUDITORIA_LEDGER` y `EVALUACION_MODELO` nunca se cachean (dependen del estado vivo). Los errores no se cachean. |
+| **Lotes** | `POST /api/v5/jev-dispatch/lote` | Hasta `JEV_LOTE_MAX` solicitudes, cada una con su propia firma y su propio bloque `DISPATCH_JEV`. Un elemento inválido no detiene el resto (`codigo_http` + `error` por elemento). El resumen va firmado (`firma_respuesta`). |
+| **Métricas** | `GET /api/v5/jev/metricas` | Por lenguaje (ejecuciones, éxitos, errores, aciertos de caché, duración media real), por tipo de tarea, rechazos por motivo, respuestas idempotentes, callbacks y estado de la caché. |
+| **Callback a JEV** | `agentes_jev/callback.py` | Si `metadatos.url_callback` existe, UASI hace POST de la respuesta firmada (cabecera `X-JEV-Firma`) en segundo plano, con 3 reintentos y backoff exponencial (0,5 s, 1 s…); los 4xx no transitorios no se reintentan. Cada entrega se registra como `CALLBACK_JEV`. La cabecera `X-JEV-Callback` indica `programado` o `rechazado: motivo`. |
+
+**Anti-SSRF del callback (deny-by-default):** solo hosts exactos de `JEV_CALLBACK_HOSTS`; `https`
+obligatorio (`http` solo para `localhost`/`127.0.0.1`); URLs con credenciales rechazadas; sin seguir
+redirecciones.
+
+**Estado en memoria:** caché, métricas e idempotencia viven en cada proceso. Con varios workers de
+gunicorn o varias réplicas, cada uno mantiene su propio estado: para idempotencia estricta entre
+réplicas, enrute por `id_solicitud` o use un único worker para JEV. (Siguiente paso posible: moverlo a
+Redis, ya presente en docker-compose.)
+
+### 7.4 SDK cliente de referencia
+
+| Archivo | Entorno | Funciones |
+|---|---|---|
+| `clientes/python/jev_cliente.py` | Python ≥ 3.9, solo stdlib | `construir_solicitud`, `firmar`, `verificar`, `ClienteJEV.despachar` / `despachar_lote` |
+| `clientes/typescript/jevCliente.ts` | Node ≥ 18 (`node:crypto` + `fetch`) | `construirSolicitud`, `firmar`, `verificarTexto`, `ClienteJEV` |
+
+El cliente TypeScript reproduce el JSON canónico de Python: formatea los números no enteros como
+`repr(float)` (p. ej. `1e-05`) y verifica las respuestas sobre el **texto** recibido conservando los
+literales numéricos (Python serializa `12.0`, que JS convertiría en `12`). Limitaciones: claves con
+caracteres fuera del BMP y cadenas con sustitutos UTF-16 sueltos. Para importes RWA se recomienda
+enviar cadenas decimales.
+
 ## 8. Despliegue
 
 - **Gunicorn + UvicornWorker** (`uasi_v5.main:app`, `PYTHONPATH=src`), con 4 workers por defecto.
@@ -243,6 +284,12 @@ firma   = HMAC-SHA256(JEV_HMAC_KEY, mensaje.encode("utf-8")).hexdigest()     # 6
 | `UASI_UMBRAL_ENTROPIA_DESBALANCE` / `UASI_UMBRAL_ENTROPIA_FEATURES` | `0.85` / `0.90` | Umbrales metacognitivos. |
 | `JEV_HMAC_KEY` | *(vacía)* | Secreto compartido con JEV; sin él `/api/v5/jev-dispatch` devuelve 503. |
 | `JEV_MAX_WORKERS` | `4` | Hilos del dispatcher multiagente JEV. |
+| `JEV_CACHE_MAX` / `JEV_CACHE_TTL` | `512` / `600` | Caché determinista de resultados de agentes (0 la desactiva). Se leen al arrancar. |
+| `JEV_VENTANA_SEGUNDOS` | `300` | Tolerancia del `timestamp` de la solicitud (anti-replay). |
+| `JEV_IDEMPOTENCIA_TTL` | `900` | Segundos que se recuerda un `id_solicitud` (nunca menos que la ventana). |
+| `JEV_LOTE_MAX` | `20` | Máximo de solicitudes en `/api/v5/jev-dispatch/lote`. |
+| `JEV_CALLBACK_HOSTS` | *(vacía)* | Lista blanca de hosts para callbacks (vacía = callbacks deshabilitados). |
+| `JEV_CALLBACK_REINTENTOS` / `JEV_CALLBACK_TIMEOUT` | `3` / `5` | Reintentos y timeout (s) del callback. |
 | `LOG_LEVEL` | `INFO` | Nivel del log JSON. |
 
 La lista completa y comentada está en [`../.env.example`](../.env.example).

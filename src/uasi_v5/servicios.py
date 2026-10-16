@@ -5,7 +5,8 @@ la API y el orquestador, y el health check detallado.
 Es el único punto donde se "cablean" las dependencias entre capas:
     ledger ──► merkle_manager
     ledger + guardian + estado_salud_detallado ──► orquestador
-    ledger.verificar_integridad + estado_salud_detallado ──► dispatcher_jev (capa JEV)
+    ledger.verificar_integridad + estado_salud_detallado + cache_jev ──► dispatcher_jev (capa JEV)
+    metricas_jev, idempotencia_jev ──► api/rutas/jev.py
 """
 
 from __future__ import annotations
@@ -15,11 +16,14 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 from uuid import uuid4
 
+from uasi_v5.agentes_jev.automatizacion import CacheResultadosJEV, MetricasJEV
 from uasi_v5.agentes_jev.dispatcher import DispatcherMultiagenteJEV
 from uasi_v5.auditoria.ledger import LedgerAuditoriaCriptografica
 from uasi_v5.auditoria.merkle_ots import OTS_DISPONIBLE, OTS_ERROR_IMPORT, MerkleOpenTimestampsManager
 from uasi_v5.core.config import (
     BITCOIN_NETWORK,
+    JEV_CACHE_MAX,
+    JEV_CACHE_TTL,
     JEV_MAX_WORKERS,
     OTS_CALENDARS,
     PATH_WORKSPACE,
@@ -31,6 +35,7 @@ from uasi_v5.core.utilidades import ahora_utc
 from uasi_v5.orquestacion.orquestador import OrquestadorSemanticoUASI
 from uasi_v5.persistencia.almacen_modelos import ruta_modelo, verificar_checksum
 from uasi_v5.seguridad.gobernanza import guardian
+from uasi_v5.seguridad.jev_replay import RegistroIdempotenciaJEV
 
 ledger = LedgerAuditoriaCriptografica()
 merkle_manager = MerkleOpenTimestampsManager(ledger)
@@ -82,6 +87,11 @@ def estado_salud_detallado() -> Dict[str, Any]:
 
 orquestador = OrquestadorSemanticoUASI(ledger_ref=ledger, guardian_ref=guardian, salud=estado_salud_detallado)
 
+cache_jev = CacheResultadosJEV(max_entradas=JEV_CACHE_MAX, ttl_segundos=JEV_CACHE_TTL)
+metricas_jev = MetricasJEV()
+idempotencia_jev = RegistroIdempotenciaJEV()
+
 dispatcher_jev = DispatcherMultiagenteJEV(
-    max_workers=JEV_MAX_WORKERS, verificar_ledger=ledger.verificar_integridad, salud=estado_salud_detallado
+    max_workers=JEV_MAX_WORKERS, verificar_ledger=ledger.verificar_integridad, salud=estado_salud_detallado,
+    cache=cache_jev,
 )

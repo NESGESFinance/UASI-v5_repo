@@ -45,6 +45,14 @@ UASI_MODEL_HMAC_KEY = os.getenv("UASI_MODEL_HMAC_KEY", "")
 JEV_MAX_WORKERS = _env_int("JEV_MAX_WORKERS", 4)
 # Solo informativa: la firma lee JEV_HMAC_KEY con os.getenv en cada petición (rotación sin reinicio).
 JEV_HMAC_KEY = os.getenv("JEV_HMAC_KEY", "")
+# Caché determinista de resultados de agentes (0 desactiva). Leídas al arrancar.
+JEV_CACHE_MAX = _env_int("JEV_CACHE_MAX", 512)
+JEV_CACHE_TTL = _env_int("JEV_CACHE_TTL", 600)
+# Informativas: se leen con os.getenv en cada petición (ver seguridad/jev_replay.py,
+# agentes_jev/callback.py y api/rutas/jev.py).
+JEV_VENTANA_SEGUNDOS = _env_int("JEV_VENTANA_SEGUNDOS", 300)
+JEV_LOTE_MAX = _env_int("JEV_LOTE_MAX", 20)
+JEV_CALLBACK_HOSTS = os.getenv("JEV_CALLBACK_HOSTS", "")
 
 BITCOIN_NETWORK = os.getenv("BITCOIN_NETWORK", "mainnet").lower()
 if BITCOIN_NETWORK not in ("mainnet", "testnet"):
