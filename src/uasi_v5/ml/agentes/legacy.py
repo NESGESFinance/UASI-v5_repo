@@ -89,7 +89,7 @@ class _GridSearchSeguro:
         self.estimador, self.rejilla, self.cv = estimador, rejilla, cv
         self.modelo_: Any = None
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> "_GridSearchSeguro":
+    def fit(self, X: np.ndarray, y: np.ndarray) -> _GridSearchSeguro:
         cv = construir_cv_seguro(y, 42)
         if cv is None:
             self.modelo_ = copy.deepcopy(self.estimador).fit(X, y)

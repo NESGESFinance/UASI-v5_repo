@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "uasi-v5"
-version = "5.2.0"
+version = "5.2.2"
 description = "UASI v5 Enterprise Production: agentes de ML gobernados, ledger auditable y anclaje en Bitcoin L1 vía OpenTimestamps"
 readme = "README.md"
 requires-python = ">=3.11"

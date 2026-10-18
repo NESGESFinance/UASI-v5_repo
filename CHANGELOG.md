@@ -6,6 +6,65 @@ sigue [Versionado Semántico](https://semver.org/lang/es/).
 
 ---
 
+## [5.2.2-enterprise] - 2026-10-18
+
+Estado JEV compartido entre workers, integración continua y limpieza de lint. No cambia la API.
+
+### Añadido
+- `agentes_jev/automatizacion_redis.py` con `CacheJEVRedis`, `MetricasJEVRedis` y `RegistroIdempotenciaJEVRedis`,
+  con la misma interfaz que las clases en memoria:
+  - caché `uasi:jev:cache:{clave}` (JSON, TTL con EX) con LRU en el sorted set `uasi:jev:cache:lru`;
+  - métricas con incrementos atómicos bajo `uasi:jev:metricas:*`, agregadas entre todos los workers;
+  - idempotencia con `SET NX EX` sobre `uasi:jev:idem:{id_solicitud}`: un reintento que cae en otro worker ya no
+    se re-ejecuta.
+- `crear_backend_jev(uri)`: usa Redis si `RATE_LIMIT_STORAGE_URI` es `redis://` y responde a PING; si no, vuelve a
+  las clases en memoria y registra un aviso. `servicios.py` crea así `cache_jev`, `metricas_jev` e `idempotencia_jev`.
+- `/api/v5/jev/metricas` → `cache.backend` indica `redis` o `memoria`.
+- CI en GitHub Actions (`.github/workflows/ci.yml`): `pip-audit`, `black --check`, `ruff`, `mypy` y `pytest` en
+  Python 3.11 para push y pull request sobre `main`. Badge de CI en el README.
+
+### Cambiado
+- `redis==8.1.0` pasa a `requirements.txt` (antes solo en desarrollo). El Dockerfile deja de instalarlo aparte.
+- `requirements-dev.txt` añade `fakeredis==2.40.0` (tests del backend Redis) y `pip-audit==2.10.1` (CI).
+- El dispatcher acepta cualquier caché que cumpla el protocolo `CacheJEV`.
+- Ruff: los 14 avisos heredados quedan corregidos (11 automáticos: UP015, UP017, UP037, UP009, I001; 3 manuales:
+  B905 con `zip(..., strict=False)` en `merkle_ots.py`, `ensamblado.py` y `metacognitivo.py`).
+  `ruff check src tests clientes` → *All checks passed!*
+
+### Docker
+- Construcción de la imagen no verificada en esta versión: el entorno de desarrollo no dispone de daemon Docker.
+  Se validó el mismo comando de arranque (gunicorn + 4 UvicornWorker) sobre un entorno limpio con
+  `requirements.txt`.
+
+### Tests
+- Nuevos: `test_backend_redis_no_disponible_usa_memory`, `test_cache_redis_compartida_y_lru`,
+  `test_metricas_redis_agregadas_entre_workers` y `test_idempotencia_redis_atomica_entre_workers` (dos «workers»
+  sobre el mismo Redis simulado). Total: **52 passed, 1 skipped**.
+
+---
+
+## [5.2.1-enterprise] - 2026-10-18
+
+Versión de seguridad. No cambia la API: los tokens HS256 emitidos antes siguen siendo válidos.
+
+### Seguridad
+- `python-jose` se sustituye por **PyJWT 2.15.1**. Así se eliminan dos vulnerabilidades sin parche:
+  - CVE-2026-85394 / GHSA-3qf3-8w2g-rqmx (`python-jose` ≤ 3.5.0, confusión de clave asimétrica en HMAC).
+  - CVE-2024-23342 / GHSA-wj6h-64fc-37mp (`ecdsa`, ataque de tiempo Minerva). Era una dependencia transitiva de `python-jose`.
+- `JWT_ALGORITHM` solo admite algoritmos HMAC (HS256/HS384/HS512). Con cualquier otro valor (RS\*, ES\*, `none`):
+  - `require_auth` responde 503 (fail-closed).
+  - `emitir_token` lanza `RuntimeError`.
+- La validación exige los claims `exp`, `iat`, `sub` e `iss`. Las excepciones de PyJWT se encadenan con `from None`
+  para no filtrar detalles internos.
+- Se eliminan `passlib[bcrypt]` y `bcrypt`: no se usaban y reducían la superficie de ataque.
+- `pip-audit -r requirements.txt` → *No known vulnerabilities found*.
+
+### Tests
+- Nuevos: `test_jwt_rechaza_alg_none_y_sin_claims` (alg `none`, emisor ajeno, sin `sub`, algoritmo distinto) y
+  `test_jwt_algoritmo_no_hmac_falla_cerrado`. Total: **48 passed, 1 skipped**.
+
+---
+
 ## [5.2.0-enterprise] - 2026-10-16
 
 Arquitectura modular por capas y nueva capa multiagente **JEV → UASI → JEV**. Es compatible con la
@@ -154,6 +213,8 @@ Revisión correctiva **P1 + P2 + P3**, basada en el informe técnico ejecutivo s
 - Endpoint `POST /api/v1/procesar`.
 - `GuardiánAuditoríaLegacy`: registro en JSON plano, sin encadenamiento hash.
 
+[5.2.2-enterprise]: #522-enterprise---2026-10-18
+[5.2.1-enterprise]: #521-enterprise---2026-10-18
 [5.2.0-enterprise]: #520-enterprise---2026-10-16
 [5.1.0-enterprise]: #510-enterprise---2026-10-12
 [5.0.0-ENTERPRISE-UNIFIED]: #500-enterprise-unified

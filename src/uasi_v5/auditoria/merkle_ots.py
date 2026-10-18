@@ -7,7 +7,7 @@ import hashlib
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
@@ -149,7 +149,7 @@ class MerkleOpenTimestampsManager:
 
         resultados = await asyncio.gather(*(enviar(u) for u in OTS_CALENDARS), return_exceptions=True)
         aceptados, errores = [], []
-        for url, res in zip(OTS_CALENDARS, resultados):
+        for url, res in zip(OTS_CALENDARS, resultados, strict=False):
             if isinstance(res, BaseException):
                 errores.append({"calendario": url, "error": f"{type(res).__name__}: {str(res)[:200]}"})
             else:
@@ -227,7 +227,7 @@ class MerkleOpenTimestampsManager:
                 "explorador": ESPLORA_API_URL,
                 "hash_bloque": hash_bloque,
                 "coincide_merkle_root": datos.get("merkle_root") == merkle_root_esperada,
-                "fecha_bloque_utc": datetime.fromtimestamp(int(datos["timestamp"]), timezone.utc).isoformat(),
+                "fecha_bloque_utc": datetime.fromtimestamp(int(datos["timestamp"]), UTC).isoformat(),
             }
         except Exception as exc:
             return {"contrastado": False, "detalle": f"{type(exc).__name__}: {str(exc)[:200]}"}

@@ -7,8 +7,8 @@ Reglas (solo se aplican a los campos que JEV envía explícitamente en el cuerpo
   menos que la ventana) junto con el hash del cuerpo firmado.
     * mismo id + mismo cuerpo ⇒ se devuelve la respuesta ya firmada (idempotencia, sin re-ejecutar);
     * mismo id + cuerpo distinto ⇒ HTTP 409 (posible replay/manipulación).
-Las variables se leen en tiempo de ejecución. Estado en memoria del proceso: con varios
-workers/réplicas cada uno lleva su propio registro (documentado en docs/arquitectura.md).
+Las variables se leen en tiempo de ejecución. Esta clase guarda el estado en memoria del proceso; con
+`RATE_LIMIT_STORAGE_URI=redis://...` se usa `RegistroIdempotenciaJEVRedis` (compartido entre workers).
 """
 
 from __future__ import annotations

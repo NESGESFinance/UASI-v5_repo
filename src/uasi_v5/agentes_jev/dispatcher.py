@@ -13,7 +13,7 @@ from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from uasi_v5.agentes_jev.automatizacion import TAREAS_NO_CACHEABLES, CacheResultadosJEV, clave_cache
+from uasi_v5.agentes_jev.automatizacion import TAREAS_NO_CACHEABLES, CacheJEV, clave_cache
 from uasi_v5.agentes_jev.base import CLAVE_CONTEXTO, AgenteJEVBase, ejecutar_agente
 from uasi_v5.agentes_jev.go_agente import AgenteGo
 from uasi_v5.agentes_jev.java_agente import AgenteJava
@@ -41,7 +41,7 @@ class DispatcherMultiagenteJEV:
         verificar_ledger: ProveedorContexto | None = None,
         salud: ProveedorContexto | None = None,
         registro: dict[str, type[AgenteJEVBase]] | None = None,
-        cache: CacheResultadosJEV | None = None,
+        cache: CacheJEV | None = None,
     ) -> None:
         self.max_workers = max(1, int(max_workers))
         self._verificar_ledger = verificar_ledger

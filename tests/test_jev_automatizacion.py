@@ -222,3 +222,123 @@ def test_sdk_verifica_respuesta_real(cliente, cabeceras, servicios):
     assert jev_cliente.verificar(r.json(), CLAVE_JEV)
     manipulada = dict(r.json(), estado="error")
     assert not jev_cliente.verificar(manipulada, CLAVE_JEV)
+
+
+# --- Backend Redis multi-worker ------------------------------------------------------
+def test_backend_redis_no_disponible_usa_memory(uasi, monkeypatch):
+    redis = pytest.importorskip("redis")
+    aut = importlib.import_module("uasi_v5.agentes_jev.automatizacion")
+    replay = importlib.import_module("uasi_v5.seguridad.jev_replay")
+    backend = importlib.import_module("uasi_v5.agentes_jev.automatizacion_redis")
+
+    class RedisCaido:
+        @classmethod
+        def from_url(cls, *args, **kwargs):
+            raise redis.exceptions.ConnectionError("Connection refused")
+
+    monkeypatch.setattr(redis, "Redis", RedisCaido)
+    cache, metricas, idem = backend.crear_backend_jev("redis://127.0.0.1:1", max_entradas=8, ttl_segundos=5)
+    assert type(cache) is aut.CacheResultadosJEV and cache.max_entradas == 8
+    assert type(metricas) is aut.MetricasJEV
+    assert type(idem) is replay.RegistroIdempotenciaJEV
+    # memory:// (o None) nunca intenta conectar
+    for uri in ("memory://", None):
+        assert type(backend.crear_backend_jev(uri, 8, 5)[0]) is aut.CacheResultadosJEV
+
+
+@pytest.fixture
+def redis_falso(uasi, monkeypatch):
+    """Dos «workers» (dos backends) compartiendo el mismo servidor Redis simulado."""
+    fakeredis = pytest.importorskip("fakeredis")
+    redis = importlib.import_module("redis")
+    servidor = fakeredis.FakeServer()
+
+    class RedisFalso:
+        @classmethod
+        def from_url(cls, *args, **kwargs):
+            return fakeredis.FakeRedis(server=servidor, decode_responses=True)
+
+    monkeypatch.setattr(redis, "Redis", RedisFalso)
+    backend = importlib.import_module("uasi_v5.agentes_jev.automatizacion_redis")
+    return (
+        backend.crear_backend_jev("redis://redis:6379", 2, 60),
+        backend.crear_backend_jev("redis://redis:6379", 2, 60),
+    )
+
+
+def _resultado(lenguaje="python", **extra):
+    esquemas = importlib.import_module("uasi_v5.esquemas.jev")
+    campos = {"lenguaje": lenguaje, "estado": "exito", "datos_resultado": {"ok": 1}, "duracion_ms": 4.0, **extra}
+    return esquemas.ResultadoAgenteJEV(**campos)
+
+
+def test_cache_redis_compartida_y_lru(redis_falso):
+    (cache_a, _, _), (cache_b, _, _) = redis_falso
+    assert type(cache_a).__name__ == "CacheJEVRedis" and cache_a.activa
+    cache_a.limpiar()
+    assert cache_b.obtener("k1") is None
+    cache_a.guardar("k1", _resultado())
+    hit = cache_b.obtener("k1")  # otro worker ve el resultado
+    assert hit is not None and hit.desde_cache is True and hit.duracion_ms == 0.0
+    assert hit.datos_resultado == {"ok": 1}
+    cache_a.guardar("k2", _resultado())
+    cache_a.guardar("k3", _resultado())  # max_entradas=2 ⇒ expulsa k1 (el más antiguo)
+    assert cache_b.obtener("k1") is None and cache_b.obtener("k3") is not None
+    estado = cache_a.estado()
+    assert estado["entradas"] == 2 and estado["aciertos"] == 2 and estado["fallos"] == 2
+    assert estado["backend"] == "redis"
+    cache_a.guardar("err", _resultado().model_copy(update={"estado": "error"}))
+    assert cache_a.obtener("err") is None  # los errores no se cachean
+    cache_b.limpiar()
+    assert cache_a.estado()["entradas"] == 0 and cache_a.estado()["aciertos"] == 0
+
+
+def test_metricas_redis_agregadas_entre_workers(redis_falso):
+    (_, met_a, _), (_, met_b, _) = redis_falso
+    met_a.reiniciar()
+    met_a.registrar_despacho("GENERACION_BINDINGS", "exito", [_resultado()])
+    met_b.registrar_despacho("GENERACION_BINDINGS", "exito", [_resultado(desde_cache=True, duracion_ms=0.0)])
+    met_b.registrar_rechazo("firma_invalida")
+    met_a.registrar_idempotente()
+    met_b.registrar_callback("enviados")
+    m = met_a.instantanea()
+    assert m["por_lenguaje"]["python"] == {
+        "ejecuciones": 2,
+        "exitos": 2,
+        "errores": 0,
+        "aciertos_cache": 1,
+        "duracion_media_ms": 4.0,
+    }
+    assert m["por_tipo_tarea"]["GENERACION_BINDINGS"] == {"despachos": 2, "exito": 2, "error_parcial": 0, "error": 0}
+    assert m["rechazos"]["firma_invalida"] == 1 and m["rechazos"]["gobernanza"] == 0
+    assert m["respuestas_idempotentes"] == 1
+    assert m["callbacks"] == {"enviados": 1, "fallidos": 0, "bloqueados": 0}
+    assert set(m) == {
+        "desde_epoch",
+        "por_lenguaje",
+        "por_tipo_tarea",
+        "rechazos",
+        "respuestas_idempotentes",
+        "callbacks",
+    }
+
+
+def test_idempotencia_redis_atomica_entre_workers(redis_falso):
+    from fastapi import HTTPException
+
+    (_, _, idem_a), (_, _, idem_b) = redis_falso
+    idem_a.limpiar()
+    assert idem_a.reservar("id-1", "h1") is None
+    with pytest.raises(HTTPException) as en_curso:  # el otro worker no puede re-ejecutarla
+        idem_b.reservar("id-1", "h1")
+    assert en_curso.value.status_code == 409 and "en curso" in en_curso.value.detail
+    with pytest.raises(HTTPException) as replay:
+        idem_b.reservar("id-1", "otra-huella")
+    assert replay.value.status_code == 409 and "replay" in replay.value.detail
+    idem_a.completar("id-1", "h1", {"estado": "exito"})
+    assert idem_b.reservar("id-1", "h1") == {"estado": "exito"}
+    idem_b.liberar("id-1")  # completada: no se libera
+    assert idem_a.reservar("id-1", "h1") == {"estado": "exito"}
+    assert idem_a.reservar("id-2", "h2") is None
+    idem_b.liberar("id-2")  # pendiente: se libera y puede reintentarse
+    assert idem_a.reservar("id-2", "h2") is None

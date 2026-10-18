@@ -5,5 +5,7 @@ httpx==0.28.1
 black==26.10.1
 ruff==0.17.0
 mypy==2.4.0
-# Backend de rate limiting multi-worker (RATE_LIMIT_STORAGE_URI=redis://...)
-redis==8.1.0
+# Redis simulado en memoria para probar el backend JEV sin servidor real
+fakeredis==2.40.0
+# Auditoría de vulnerabilidades de dependencias (CI)
+pip-audit==2.10.1

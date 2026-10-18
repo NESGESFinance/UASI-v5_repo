@@ -45,7 +45,7 @@ class AgenteAnalistaDatosMetacognitivo:
             "n_muestras": int(X.shape[0]),
             "n_caracteristicas": int(X.shape[1]),
             "clases": clases.tolist(),
-            "distribucion_clases": {str(c): int(n) for c, n in zip(clases, conteos)},
+            "distribucion_clases": {str(c): int(n) for c, n in zip(clases, conteos, strict=False)},
             "entropia_shannon_bits": round(h_clases, 6),
             "entropia_clases_normalizada": round(h_norm, 6),
             "ratio_desbalance": round(float(conteos.max() / conteos.min()), 4),
