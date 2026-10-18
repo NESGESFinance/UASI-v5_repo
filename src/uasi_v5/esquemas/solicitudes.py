@@ -52,7 +52,7 @@ class SolicitudProcesamientoV1(_BaseSolicitud):
         return _validar_matriz(v)
 
     @model_validator(mode="after")
-    def validar_coherencia(self) -> "SolicitudProcesamientoV1":
+    def validar_coherencia(self) -> SolicitudProcesamientoV1:
         if len(self.inputs) != len(self.targets):
             raise ValueError(f"len(inputs)={len(self.inputs)} != len(targets)={len(self.targets)}.")
         invalidos = sorted({t for t in self.targets if t not in (0, 1)})
@@ -77,7 +77,7 @@ class SolicitudMaestraV5(_BaseSolicitud):
         return None if v is None else _validar_matriz(v)
 
     @model_validator(mode="after")
-    def validar_coherencia(self) -> "SolicitudMaestraV5":
+    def validar_coherencia(self) -> SolicitudMaestraV5:
         if (self.inputs is None) != (self.targets is None):
             raise ValueError("inputs y targets deben enviarse juntos.")
         if self.inputs is not None:
@@ -103,7 +103,7 @@ class SolicitudStreaming(_BaseSolicitud):
         return _validar_matriz(v)
 
     @model_validator(mode="after")
-    def validar_coherencia(self) -> "SolicitudStreaming":
+    def validar_coherencia(self) -> SolicitudStreaming:
         if len(self.inputs) != len(self.targets):
             raise ValueError(f"len(inputs)={len(self.inputs)} != len(targets)={len(self.targets)}.")
         if not self.targets or any(t < 0 for t in self.targets):

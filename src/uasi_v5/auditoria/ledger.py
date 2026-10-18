@@ -92,7 +92,7 @@ class LedgerAuditoriaCriptografica:
     def iterar(self):
         if not os.path.exists(self.ruta):
             return
-        with open(self.ruta, "r", encoding="utf-8") as f:
+        with open(self.ruta, encoding="utf-8") as f:
             for linea in f:
                 if linea.strip():
                     yield json.loads(linea)

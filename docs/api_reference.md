@@ -1,4 +1,4 @@
-# Referencia de la API · UASI v5 Enterprise (5.2.1-enterprise)
+# Referencia de la API · UASI v5 Enterprise (5.2.2-enterprise)
 
 - **URL base:** `http://<host>:8000`. Puerto por defecto: `PORT=8000`.
 - **Formato:** JSON (`Content-Type: application/json`), con fechas en ISO 8601 UTC.
@@ -583,4 +583,5 @@ Devuelve `lenguajes`, `tipos_tarea`, `tareas_no_cacheables`, `max_workers`, `jev
 
 Devuelve `por_lenguaje` (`ejecuciones`, `exitos`, `errores`, `aciertos_cache`, `duracion_media_ms`),
 `por_tipo_tarea`, `rechazos` (`firma_invalida`, `sin_configurar`, `fuera_de_ventana`, `replay_conflicto`,
-`validacion`, `gobernanza`), `respuestas_idempotentes`, `callbacks` y `cache`. Las métricas son por proceso.
+`validacion`, `gobernanza`), `respuestas_idempotentes`, `callbacks` y `cache` (incluye `backend`: `redis` o `memoria`). Con `RATE_LIMIT_STORAGE_URI=redis://...`
+las métricas se agregan entre todos los workers/réplicas; con `memory://` son por proceso.

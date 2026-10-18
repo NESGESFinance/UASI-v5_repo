@@ -6,6 +6,8 @@ gunicorn==26.2.0
 pydantic==2.13.5
 # PyJWT sustituye a python-jose (CVE-2026-85394) y elimina ecdsa (CVE-2024-23342). Solo HMAC: sin extra [crypto].
 PyJWT==2.15.1
+# Backend compartido multi-worker: rate limiting (slowapi) y caché/idempotencia/métricas JEV.
+redis==8.1.0
 slowapi==0.1.10
 joblib==1.6.0
 filelock==3.32.3

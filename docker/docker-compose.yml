@@ -11,7 +11,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
-    image: uasi-v5:5.2.1
+    image: uasi-v5:5.2.2
     container_name: uasi-api
     restart: unless-stopped
     ports:

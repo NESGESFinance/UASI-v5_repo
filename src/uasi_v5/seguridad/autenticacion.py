@@ -6,9 +6,9 @@ from datetime import timedelta
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
+import jwt
 from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
-import jwt
 
 from uasi_v5.core.config import JWT_ALGORITHM, JWT_EXP_MINUTES, JWT_ISSUER, SECRET_JWT_KEY
 from uasi_v5.core.utilidades import ahora_utc

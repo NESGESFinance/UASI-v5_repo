@@ -14,7 +14,7 @@ import threading
 import time
 from collections import OrderedDict
 from collections.abc import Iterable
-from typing import Any
+from typing import Any, Protocol
 
 from uasi_v5.core.utilidades import json_canonico, sha256_hex
 from uasi_v5.esquemas.jev import ResultadoAgenteJEV
@@ -34,6 +34,17 @@ def entero_env(nombre: str, defecto: int, minimo: int = 0) -> int:
 def clave_cache(identidad_agente: str, tipo_tarea: str, datos: dict[str, Any]) -> str:
     """Clave = SHA-256 del JSON canónico de (agente, tarea, datos)."""
     return sha256_hex(json_canonico({"agente": identidad_agente, "tarea": tipo_tarea, "datos": datos}).encode())
+
+
+class CacheJEV(Protocol):
+    """Interfaz mínima de caché que usa el dispatcher (en memoria o Redis)."""
+
+    @property
+    def activa(self) -> bool: ...
+
+    def obtener(self, clave: str) -> ResultadoAgenteJEV | None: ...
+
+    def guardar(self, clave: str, resultado: ResultadoAgenteJEV) -> None: ...
 
 
 class CacheResultadosJEV:
@@ -82,7 +93,8 @@ class CacheResultadosJEV:
     def estado(self) -> dict[str, Any]:
         with self._lock:
             return {"activa": self.activa, "entradas": len(self._datos), "max_entradas": self.max_entradas,
-                    "ttl_segundos": self.ttl_segundos, "aciertos": self.aciertos, "fallos": self.fallos}
+                    "ttl_segundos": self.ttl_segundos, "aciertos": self.aciertos, "fallos": self.fallos,
+                    "backend": "memoria"}
 
 
 def _contador_lenguaje() -> dict[str, float]:

@@ -65,7 +65,7 @@ def verificar_checksum(path: str) -> Tuple[bool, str]:
         return False, "inexistente"
     if not os.path.exists(ruta_sha):
         return False, "checksum_ausente"
-    with open(ruta_sha, "r", encoding="utf-8") as f:
+    with open(ruta_sha, encoding="utf-8") as f:
         esperado = f.read().strip()
     real = _digest_archivo(path)
     if not hmac.compare_digest(esperado, real):

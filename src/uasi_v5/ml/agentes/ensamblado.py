@@ -28,7 +28,7 @@ class AgenteEnsambladoExplicable:
             version = (previo or {}).get("version", 0) + 1
             guardar_modelo_seguro({"modelo": modelo, "version": version, "n_features": int(X.shape[1])}, self.ruta)
         nombres = nombres if nombres and len(nombres) == X.shape[1] else [f"x{i}" for i in range(X.shape[1])]
-        importancias = sorted(zip(nombres, modelo.feature_importances_.tolist()), key=lambda t: -t[1])
+        importancias = sorted(zip(nombres, modelo.feature_importances_.tolist(), strict=False), key=lambda t: -t[1])
         return {
             "agente": "ensamblado_explicable_gb",
             "version_modelo": version,

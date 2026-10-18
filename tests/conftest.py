@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Configuración compartida de pytest para UASI v5.
 

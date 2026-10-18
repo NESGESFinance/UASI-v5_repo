@@ -1,4 +1,4 @@
-# Arquitectura de UASI v5 Enterprise (5.2.1-enterprise)
+# Arquitectura de UASI v5 Enterprise (5.2.2-enterprise)
 
 ## 1. Visión general
 
@@ -240,10 +240,13 @@ JWT ─► firma HMAC (503/401) ─► ventana temporal (401) ─► gobernanza 
 obligatorio (`http` solo para `localhost`/`127.0.0.1`); URLs con credenciales rechazadas; sin seguir
 redirecciones.
 
-**Estado en memoria:** caché, métricas e idempotencia viven en cada proceso. Con varios workers de
-gunicorn o varias réplicas, cada uno mantiene su propio estado: para idempotencia estricta entre
-réplicas, enrute por `id_solicitud` o use un único worker para JEV. (Siguiente paso posible: moverlo a
-Redis, ya presente en docker-compose.)
+**Estado compartido (Redis):** con `RATE_LIMIT_STORAGE_URI=redis://...` (por defecto en docker-compose),
+`crear_backend_jev()` (`agentes_jev/automatizacion_redis.py`) guarda caché, métricas e idempotencia en Redis:
+- caché: `uasi:jev:cache:{clave}` (JSON, TTL con EX) + LRU en el sorted set `uasi:jev:cache:lru`;
+- métricas: incrementos atómicos bajo `uasi:jev:metricas:*`, agregadas entre todos los workers;
+- idempotencia: `SET NX EX` sobre `uasi:jev:idem:{id_solicitud}`, reserva atómica entre workers/réplicas.
+Si la URI no es `redis://` o Redis no responde al arrancar, se registra un aviso y se usan las clases en
+memoria (estado por proceso, como en 5.2.0).
 
 ### 7.4 SDK cliente de referencia
 
@@ -261,7 +264,7 @@ enviar cadenas decimales.
 ## 8. Despliegue
 
 - **Gunicorn + UvicornWorker** (`uasi_v5.main:app`, `PYTHONPATH=src`), con 4 workers por defecto.
-- Con varios workers, `RATE_LIMIT_STORAGE_URI=redis://...` hace que el límite se comparta entre ellos.
+- Con varios workers, `RATE_LIMIT_STORAGE_URI=redis://...` hace que el límite y el estado JEV se compartan entre ellos.
 - **Docker**: imagen multi-stage `python:3.11-slim`, usuario no root (uid 10001), `tini`, HEALTHCHECK
   sobre `/api/v5/health` y volumen `/data`. Compose añade Redis 7.4, `read_only` y `cap_drop: [ALL]`.
 - Guía completa: [`../DEPLOY_README.md`](../DEPLOY_README.md).
