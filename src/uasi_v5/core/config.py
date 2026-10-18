@@ -20,7 +20,7 @@ def _env_float(nombre: str, defecto: float) -> float:
 
 
 # --- Constantes de configuración (todas sobreescribibles por entorno) ---------
-VERSION_UASI = "5.2.0-enterprise"
+VERSION_UASI = "5.2.1-enterprise"
 UASI_ENV = os.getenv("UASI_ENV", "development").lower()
 PATH_WORKSPACE = os.path.abspath(os.getenv("PATH_WORKSPACE", "./uasi_workspace"))
 PATH_MODELOS = os.path.join(PATH_WORKSPACE, "modelos")

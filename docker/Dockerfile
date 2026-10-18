@@ -3,7 +3,7 @@
 # UASI v5 Enterprise Production — imagen multi-stage
 #   Etapa 1 (builder): toolchain de compilación + venv con todas las dependencias
 #   Etapa 2 (runtime): python:3.11-slim, solo el venv y el código, usuario no-root
-# Construir (desde la raíz del repo):  docker build -f docker/Dockerfile -t uasi-v5:5.2.0 .
+# Construir (desde la raíz del repo):  docker build -f docker/Dockerfile -t uasi-v5:5.2.1 .
 # =============================================================================
 
 ARG PYTHON_VERSION=3.11
@@ -37,7 +37,7 @@ RUN pip install --upgrade pip setuptools wheel \
 FROM python:${PYTHON_VERSION}-slim AS runtime
 
 LABEL org.opencontainers.image.title="UASI v5 Enterprise Production" \
-      org.opencontainers.image.version="5.2.0-enterprise" \
+      org.opencontainers.image.version="5.2.1-enterprise" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.description="Agentes de ML gobernados con ledger anclado en Bitcoin vía OpenTimestamps"
 

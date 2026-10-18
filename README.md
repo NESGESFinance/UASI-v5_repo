@@ -1,9 +1,9 @@
 # UASI v5 Enterprise Production
 
-![versión](https://img.shields.io/badge/versión-5.2.0--enterprise-blue)
+![versión](https://img.shields.io/badge/versión-5.2.1--enterprise-blue)
 ![estado](https://img.shields.io/badge/estado-producción-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
-![tests](https://img.shields.io/badge/tests-46%20passed%20%7C%201%20skipped-success)
+![tests](https://img.shields.io/badge/tests-48%20passed%20%7C%201%20skipped-success)
 ![bitcoin](https://img.shields.io/badge/anclaje-Bitcoin%20L1%20·%20OpenTimestamps-F7931A?logo=bitcoin&logoColor=white)
 ![licencia](https://img.shields.io/badge/licencia-MIT-lightgrey)
 
@@ -74,7 +74,7 @@ Hay una descripción más detallada en [`docs/arquitectura.md`](docs/arquitectur
 
 | Módulo / clase | Versión de origen | Responsabilidad |
 |---|---|---|
-| `require_auth` / `emitir_token` | 5.1 | Emisión y validación de JWT Bearer (HS256). Responde 503 si falta `SECRET_JWT_KEY`. |
+| `require_auth` / `emitir_token` | 5.1 | Emisión y validación de JWT Bearer con PyJWT (solo HS256/HS384/HS512). Responde 503 si falta `SECRET_JWT_KEY` o si `JWT_ALGORITHM` no es HMAC. |
 | `LimiteTamanoPayloadMiddleware` | 5.1 | Corta a nivel ASGI los payloads mayores que `MAX_PAYLOAD_BYTES` (413). |
 | `GuardiánGobernanzaSeguridad` | 5.0 → 5.1 | Allow-list de intenciones, deny-list, sanitización de matrices, validación de metadatos y clasificación del prompt maestro. |
 | `AgenteRedNeuronalLegacy` | 1.0 | MLP clásico (`MLPClassifier`) del endpoint v1. |
@@ -419,7 +419,7 @@ make help         # lista todos los targets
 - [`docs/arquitectura.md`](docs/arquitectura.md): componentes, flujos y decisiones de diseño.
 - [`docs/api_reference.md`](docs/api_reference.md): referencia completa de la API.
 - [`docs/bitcoin_opentimestamps.md`](docs/bitcoin_opentimestamps.md): OpenTimestamps, OP_RETURN y verificación a largo plazo.
-- [`CHANGELOG.md`](CHANGELOG.md): historial de versiones (de la v1.0 a la v5.2.0-enterprise).
+- [`CHANGELOG.md`](CHANGELOG.md): historial de versiones (de la v1.0 a la v5.2.1-enterprise).
 
 ## Licencia
 

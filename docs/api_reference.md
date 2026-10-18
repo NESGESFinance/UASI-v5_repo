@@ -1,4 +1,4 @@
-# Referencia de la API · UASI v5 Enterprise (5.2.0-enterprise)
+# Referencia de la API · UASI v5 Enterprise (5.2.1-enterprise)
 
 - **URL base:** `http://<host>:8000`. Puerto por defecto: `PORT=8000`.
 - **Formato:** JSON (`Content-Type: application/json`), con fechas en ISO 8601 UTC.
