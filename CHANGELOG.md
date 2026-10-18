@@ -6,6 +6,28 @@ sigue [Versionado Semántico](https://semver.org/lang/es/).
 
 ---
 
+## [5.2.1-enterprise] - 2026-10-18
+
+Versión de seguridad. No cambia la API: los tokens HS256 emitidos antes siguen siendo válidos.
+
+### Seguridad
+- `python-jose` se sustituye por **PyJWT 2.15.1**. Así se eliminan dos vulnerabilidades sin parche:
+  - CVE-2026-85394 / GHSA-3qf3-8w2g-rqmx (`python-jose` ≤ 3.5.0, confusión de clave asimétrica en HMAC).
+  - CVE-2024-23342 / GHSA-wj6h-64fc-37mp (`ecdsa`, ataque de tiempo Minerva). Era una dependencia transitiva de `python-jose`.
+- `JWT_ALGORITHM` solo admite algoritmos HMAC (HS256/HS384/HS512). Con cualquier otro valor (RS\*, ES\*, `none`):
+  - `require_auth` responde 503 (fail-closed).
+  - `emitir_token` lanza `RuntimeError`.
+- La validación exige los claims `exp`, `iat`, `sub` e `iss`. Las excepciones de PyJWT se encadenan con `from None`
+  para no filtrar detalles internos.
+- Se eliminan `passlib[bcrypt]` y `bcrypt`: no se usaban y reducían la superficie de ataque.
+- `pip-audit -r requirements.txt` → *No known vulnerabilities found*.
+
+### Tests
+- Nuevos: `test_jwt_rechaza_alg_none_y_sin_claims` (alg `none`, emisor ajeno, sin `sub`, algoritmo distinto) y
+  `test_jwt_algoritmo_no_hmac_falla_cerrado`. Total: **48 passed, 1 skipped**.
+
+---
+
 ## [5.2.0-enterprise] - 2026-10-16
 
 Arquitectura modular por capas y nueva capa multiagente **JEV → UASI → JEV**. Es compatible con la

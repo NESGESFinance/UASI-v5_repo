@@ -9,6 +9,7 @@ import json
 import math
 import os
 import sys
+import time
 
 import numpy as np
 import pytest
@@ -75,13 +76,44 @@ def test_autenticacion(cliente, cabeceras):
 
 
 def test_token_expirado(uasi, cliente):
-    from jose import jwt
+    import jwt
 
     claims = {"iss": uasi.JWT_ISSUER, "sub": "x", "iat": 1, "exp": 2}
     tok = jwt.encode(claims, uasi.SECRET_JWT_KEY, algorithm="HS256")
     r = cliente.get("/api/v5/cryptographic-ledger", headers={"Authorization": f"Bearer {tok}"})
     assert r.status_code == 401 and "expirado" in r.json()["detail"]
 
+
+
+def test_jwt_rechaza_alg_none_y_sin_claims(uasi, cliente):
+    """Regresión CVE-2026-85394 / confusión de algoritmos: alg=none, emisor ajeno y claims ausentes → 401."""
+    import base64
+    import json as _json
+
+    import jwt
+
+    def b64(d):
+        return base64.urlsafe_b64encode(_json.dumps(d).encode()).rstrip(b"=").decode()
+
+    ahora = int(time.time())
+    base = {"iss": uasi.JWT_ISSUER, "sub": "x", "iat": ahora, "exp": ahora + 60}
+    tok_none = f"{b64({'alg': 'none', 'typ': 'JWT'})}.{b64(base)}."
+    tok_iss = jwt.encode({**base, "iss": "otro"}, uasi.SECRET_JWT_KEY, algorithm="HS256")
+    tok_sin_sub = jwt.encode({k: v for k, v in base.items() if k != "sub"}, uasi.SECRET_JWT_KEY, algorithm="HS256")
+    tok_hs512 = jwt.encode(base, uasi.SECRET_JWT_KEY, algorithm="HS512")  # algoritmo distinto al configurado
+    for tok in (tok_none, tok_iss, tok_sin_sub, tok_hs512):
+        r = cliente.get("/api/v5/cryptographic-ledger", headers={"Authorization": f"Bearer {tok}"})
+        assert r.status_code == 401, tok
+
+
+def test_jwt_algoritmo_no_hmac_falla_cerrado(monkeypatch, cliente, cabeceras):
+    from uasi_v5.seguridad import autenticacion
+
+    monkeypatch.setattr(autenticacion, "JWT_ALGORITHM", "RS256")
+    r = cliente.get("/api/v5/cryptographic-ledger", headers=cabeceras)
+    assert r.status_code == 503
+    with pytest.raises(RuntimeError):
+        autenticacion.emitir_token("x")
 
 # 3. Dimensionalidad / binariedad / gobernanza --------------------------------
 @pytest.mark.parametrize("payload", [

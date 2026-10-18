@@ -1,4 +1,4 @@
-# Arquitectura de UASI v5 Enterprise (5.2.0-enterprise)
+# Arquitectura de UASI v5 Enterprise (5.2.1-enterprise)
 
 ## 1. Visión general
 

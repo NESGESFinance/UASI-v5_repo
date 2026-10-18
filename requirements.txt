@@ -4,10 +4,8 @@ starlette==1.7.0
 uvicorn[standard]==0.54.0
 gunicorn==26.2.0
 pydantic==2.13.5
-python-jose[cryptography]==3.5.0
-# passlib se incluye por petición (hash de credenciales futuras); el código actual no lo importa.
-passlib[bcrypt]==1.7.4
-bcrypt==4.0.1
+# PyJWT sustituye a python-jose (CVE-2026-85394) y elimina ecdsa (CVE-2024-23342). Solo HMAC: sin extra [crypto].
+PyJWT==2.15.1
 slowapi==0.1.10
 joblib==1.6.0
 filelock==3.32.3
