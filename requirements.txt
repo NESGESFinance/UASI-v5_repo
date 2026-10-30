@@ -10,7 +10,7 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 slowapi==0.1.10
 joblib==1.6.0
-filelock==3.32.3
+filelock==4.2.1
 scikit-learn==1.9.1
 scipy==1.14.1
 numpy==1.26.4
