@@ -10,6 +10,9 @@ PyJWT==2.15.1
 redis==8.1.0
 slowapi==0.1.10
 joblib==1.6.0
+# Capa de datos (ledger_entries, agent_metrics, revoked_tokens, admin_sessions). SQLite en dev;
+# para PostgreSQL instale además un driver (p. ej. psycopg[binary]) y use DATABASE_URL=postgresql+psycopg://...
+SQLAlchemy==2.1.8
 filelock==3.32.3
 scikit-learn==1.9.1
 scipy==1.14.1

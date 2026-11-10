@@ -1,4 +1,4 @@
-# Arquitectura de UASI v5 Enterprise (5.2.2-enterprise)
+# Arquitectura de UASI v5 Enterprise (5.3.0-enterprise)
 
 ## 1. Visión general
 
@@ -123,7 +123,19 @@ las métricas se calculan sobre el entrenamiento y se etiquetan como
 ## 5. Plano de auditoría
 
 ### 5.1 Ledger
-Es un archivo JSONL append-only (`PATH_WORKSPACE/ledger/ledger_auditoria.jsonl`) con un bloque por
+Desde la v5.3.0 el backend por defecto es **SQL** (`UASI_LEDGER_BACKEND=sql`, clase `LedgerInmutableSQL`,
+tabla `ledger_entries` en `DATABASE_URL`):
+
+```text
+hash_actual = SHA256(hash_anterior | timestamp | evento | actor | datos_json)     (génesis: "0"*64)
+```
+
+Es append-only en tres niveles: la API solo expone `registrar`; los listeners ORM `before_update` /
+`before_delete` lanzan `LedgerInmutableError`; y la migración `m0001_inicial` crea triggers en SQLite/PostgreSQL
+que abortan cualquier UPDATE o DELETE. `verificar_integridad()` recalcula toda la cadena. Expone la misma
+interfaz que el ledger JSONL (alias `indice`, `hash_previo`, `hash_bloque`), por lo que Merkle/OTS no cambia.
+
+Con `UASI_LEDGER_BACKEND=jsonl` se mantiene el ledger heredado: un archivo JSONL append-only (`PATH_WORKSPACE/ledger/ledger_auditoria.jsonl`) con un bloque por
 línea y un bloque GENESIS al arrancar:
 
 ```text
@@ -131,7 +143,7 @@ hash_datos  = SHA256(JSON canónico de datos)
 hash_bloque = SHA256(JSON canónico de {indice, timestamp, fecha, evento, actor, datos, hash_datos, hash_previo})
 ```
 
-Eventos: `GENESIS`, `PROCESAMIENTO_V1`, `EJECUCION_MAESTRA_V5`, `INGESTA_STREAMING`, `DISPATCH_JEV` y `ANCLAJE_MERKLE_OTS`.
+Eventos: `GENESIS`, `REVOCACION_TOKEN`, `PROCESAMIENTO_V1`, `EJECUCION_MAESTRA_V5`, `INGESTA_STREAMING`, `DISPATCH_JEV` y `ANCLAJE_MERKLE_OTS`.
 `verificar_integridad()` comprueba la continuidad de los índices, el encadenamiento, `hash_datos` y `hash_bloque`.
 
 ### 5.2 Merkle + OpenTimestamps
@@ -148,10 +160,34 @@ Más detalles en [`bitcoin_opentimestamps.md`](bitcoin_opentimestamps.md).
 
 ```text
 PATH_WORKSPACE/
-├── modelos/      # *.joblib + checksum (SHA-256/HMAC) + .lock
-├── ledger/       # ledger_auditoria.jsonl (+ .lock)
+├── modelos/      # *.joblib + *.joblib.manifest.json (HMAC-SHA256) + .lock
+├── uasi.db       # SQLite por defecto (ledger_entries, agent_metrics, revoked_tokens, admin_sessions)
+├── ledger/       # ledger_auditoria.jsonl (+ .lock), solo con UASI_LEDGER_BACKEND=jsonl
 └── ots_proofs/   # <fecha>.ots · <fecha>_<sello>.ots · <fecha>.json
 ```
+
+### 6.1 Modelos: joblib + manifiesto firmado
+`guardar_modelo_seguro` escribe el artefacto con `joblib` y un manifiesto JSON
+`{formato, path, sha256, hmac, timestamp, version}`; el HMAC-SHA256 (clave `SECRET_KEY`) cubre todos los campos.
+`cargar_modelo_seguro` verifica el manifiesto y el SHA-256 del archivo **antes** de `joblib.load`; si algo no
+cuadra lanza `IntegridadModeloError` sin deserializar. No se usa `pickle` directamente en ningún punto.
+
+### 6.2 Base de datos (`uasi_v5.db`)
+`sesion.py` crea el motor a partir de `DATABASE_URL` (SQLite con `check_same_thread=False` en desarrollo,
+PostgreSQL con `pool_pre_ping` en producción) y expone `get_db()` como dependencia FastAPI. `inicializar_bd()`
+se ejecuta en el *lifespan* y aplica `migraciones/m0001_inicial.py`.
+
+### 6.3 Privacidad diferencial de métricas
+`MetricasPrivadas.publicar(metrica, sensibilidad)` aplica el mecanismo gaussiano con
+σ = Δ·√(2·ln(1,25/δ))/ε (ε = 1,0, δ = 10⁻⁵ por defecto). `privatizar_resultado` elimina pesos, gradientes,
+estado del optimizador e historial de pérdidas antes de devolver o registrar resultados de entrenamiento.
+
+### 6.4 Administración, WebSocket y rate limiting
+- `/api/v5/admin/*` (scope `admin`, sesiones registradas en `admin_sessions`).
+- `/ws/agents?token=` emite el estado de agentes cada `UASI_WS_INTERVALO_SEGUNDOS`.
+- `LimiteTasaDistribuidoMiddleware`: contadores por IP en Redis (`INCR`/`EXPIRE`, ventana de 60 s), 30/min en
+  JEV y 100/min en admin, con fallback en memoria si Redis no está disponible.
+- `MetricasHTTPMiddleware`: latencia (media/p50/p95/p99), errores 4xx/5xx y throughput por worker para `/api/v5/admin/metrics`.
 
 ## 7. Capa multiagente JEV (JEV → UASI → JEV)
 
@@ -274,12 +310,17 @@ enviar cadenas decimales.
 | Variable | Defecto | Uso |
 |---|---|---|
 | `UASI_ENV` | `development` | Con `production` se desactiva `/api/v5/token`. |
-| `SECRET_JWT_KEY` | *(vacía)* | Obligatoria; sin ella los endpoints devuelven 503. |
+| `SECRET_JWT_KEY` (alias `JWT_SECRET`) | *(vacía)* | ≥ 32 caracteres, validada al arrancar; obligatoria en producción (si falta o es débil → `RuntimeError`). |
 | `JWT_ALGORITHM` / `JWT_ISSUER` / `JWT_EXP_MINUTES` | `HS256` / `uasi-v5` / `60` | Parámetros del JWT. |
 | `RATE_LIMIT_PER_MINUTE` / `RATE_LIMIT_STORAGE_URI` | `30` / `memory://` | Rate limiting. |
 | `MAX_PAYLOAD_BYTES` | `10485760` | Límite de payload. |
 | `UASI_MAX_MUESTRAS` / `UASI_MAX_FEATURES` | `50000` / `512` | Límites del dataset. |
-| `UASI_MODEL_HMAC_KEY` | *(vacía)* | Activa HMAC-SHA256 para los modelos. |
+| `SECRET_KEY` (alias `UASI_MODEL_HMAC_KEY`) | *(vacía)* | Firma HMAC-SHA256 de los manifiestos de modelos. ≥ 32 caracteres; obligatoria en producción. |
+| `DATABASE_URL` | `sqlite:///$PATH_WORKSPACE/uasi.db` | SQLite (dev) o PostgreSQL (prod). |
+| `UASI_LEDGER_BACKEND` | `sql` | `sql` (tabla `ledger_entries`) o `jsonl` (heredado). |
+| `RATE_LIMIT_JEV_PER_MINUTE` / `RATE_LIMIT_ADMIN_PER_MINUTE` | `30` / `100` | Rate limiting distribuido por IP. |
+| `UASI_DP_ACTIVA` / `UASI_DP_EPSILON` / `UASI_DP_DELTA` | `1` / `1.0` / `1e-5` | Privacidad diferencial de métricas. |
+| `UASI_WS_INTERVALO_SEGUNDOS` | `5` | Intervalo del WebSocket `/ws/agents`. |
 | `PATH_WORKSPACE` | `./uasi_workspace` | Raíz de la persistencia. |
 | `BITCOIN_NETWORK` | `mainnet` | `mainnet` o `testnet`. |
 | `OTS_CALENDARS` / `OTS_MIN_CALENDARS` / `OTS_TIMEOUT_SECONDS` | 3 calendarios públicos / `1` / `10` | OpenTimestamps. |

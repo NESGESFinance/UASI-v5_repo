@@ -14,7 +14,7 @@ from uuid import uuid4
 from filelock import FileLock
 from starlette.concurrency import run_in_threadpool
 
-from uasi_v5.auditoria.ledger import LedgerAuditoriaCriptografica
+from uasi_v5.auditoria.ledger import LedgerAuditoriaCriptografica, LedgerInmutableSQL
 from uasi_v5.core.config import (
     BITCOIN_NETWORK,
     ESPLORA_API_URL,
@@ -86,7 +86,7 @@ class MerkleOpenTimestampsManager:
 
     PATRON_FECHA = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-    def __init__(self, ledger_ref: LedgerAuditoriaCriptografica, directorio: str = PATH_OTS) -> None:
+    def __init__(self, ledger_ref: LedgerAuditoriaCriptografica | LedgerInmutableSQL, directorio: str = PATH_OTS) -> None:
         self.ledger = ledger_ref
         self.directorio = directorio
 

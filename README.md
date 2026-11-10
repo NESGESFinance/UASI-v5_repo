@@ -1,9 +1,9 @@
 # UASI v5 Enterprise Production
 
-![versión](https://img.shields.io/badge/versión-5.2.2--enterprise-blue)
+![versión](https://img.shields.io/badge/versión-5.3.0--enterprise-blue)
 ![estado](https://img.shields.io/badge/estado-producción-brightgreen)
 ![python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
-![tests](https://img.shields.io/badge/tests-52%20passed%20%7C%201%20skipped-success)
+![tests](https://img.shields.io/badge/tests-92%20passed%20%7C%201%20skipped-success)
 [![CI](https://github.com/NESGESFinance/UASI-v5_repo/actions/workflows/ci.yml/badge.svg)](https://github.com/NESGESFinance/UASI-v5_repo/actions/workflows/ci.yml)
 ![bitcoin](https://img.shields.io/badge/anclaje-Bitcoin%20L1%20·%20OpenTimestamps-F7931A?logo=bitcoin&logoColor=white)
 ![licencia](https://img.shields.io/badge/licencia-MIT-lightgrey)
@@ -21,6 +21,11 @@ OpenTimestamps.
 > `uasi_v5.main:app` y `from uasi_v5.main import ...` siguen funcionando. Incluye la nueva
 > [capa multiagente JEV](#capa-multiagente-jev).
 
+> **Novedades v5.3.0:** persistencia de modelos con `joblib` + manifiesto firmado HMAC-SHA256 (sin `pickle`),
+> ledger append-only en base de datos (`ledger_entries`, SQLite/PostgreSQL), privacidad diferencial en las
+> métricas (ε = 1,0), [API de administración y WebSocket](#administración-y-websocket-v530), rate limiting
+> distribuido con Redis y validación estricta de secretos al arranque.
+
 ---
 
 ## Índice
@@ -32,10 +37,11 @@ OpenTimestamps.
 5. [Instalación en 5 pasos](#instalación-en-5-pasos)
 6. [Uso de la API (curl)](#uso-de-la-api-curl)
 7. [Capa multiagente JEV](#capa-multiagente-jev)
-8. [Anclaje en Bitcoin L1](#anclaje-en-bitcoin-l1)
-9. [Estructura del repositorio](#estructura-del-repositorio)
-10. [Desarrollo, tests y Docker](#desarrollo-tests-y-docker)
-11. [Documentación adicional](#documentación-adicional)
+8. [Administración y WebSocket (v5.3.0)](#administración-y-websocket-v530)
+9. [Anclaje en Bitcoin L1](#anclaje-en-bitcoin-l1)
+10. [Estructura del repositorio](#estructura-del-repositorio)
+11. [Desarrollo, tests y Docker](#desarrollo-tests-y-docker)
+12. [Documentación adicional](#documentación-adicional)
 
 ---
 
@@ -326,6 +332,32 @@ const r = await cliente.despachar("GENERACION_BINDINGS", ["rust", "go"], { activ
 
 Ambos clientes firman la solicitud y **rechazan cualquier respuesta cuya firma no sea válida**.
 
+## Administración y WebSocket (v5.3.0)
+
+Las rutas `/api/v5/admin/*` exigen un JWT con scope `admin` y tienen un límite de 100 req/min por IP
+(30 req/min en las rutas JEV), compartido entre workers mediante Redis.
+
+```bash
+# Token de administración (solo en desarrollo; en producción lo emite su IdP con scope "admin")
+ADMIN=$(curl -s "http://localhost:8000/api/v5/token?sujeto=ops&alcance=uasi:full%20admin" | jq -r .access_token)
+
+curl -s -H "Authorization: Bearer $ADMIN" http://localhost:8000/api/v5/admin/agents
+curl -s -H "Authorization: Bearer $ADMIN" http://localhost:8000/api/v5/admin/metrics
+curl -s -H "Authorization: Bearer $ADMIN" "http://localhost:8000/api/v5/admin/ledger?page=1&limit=50"
+curl -s -H "Authorization: Bearer $ADMIN" http://localhost:8000/api/v5/admin/health/detailed
+curl -s -X POST -H "Authorization: Bearer $ADMIN" http://localhost:8000/api/v5/admin/anchor
+```
+
+WebSocket de estado en tiempo real (un mensaje cada 5 s):
+
+```bash
+websocat "ws://localhost:8000/ws/agents?token=$ADMIN"
+# {"tipo":"estado_agentes","timestamp":"...","agentes":[{"id":"jev:python","nombre":"AgentePython","estado":"inactivo","ultima_actividad":null}, ...]}
+```
+
+> Al arrancar se validan `SECRET_KEY` y `SECRET_JWT_KEY` (≥ 32 caracteres, distintos, sin valores de ejemplo).
+> Si fallan, la aplicación no arranca (`RuntimeError`). Genérelos con `./scripts/generar_secretos.sh`.
+
 ## Anclaje en Bitcoin L1
 
 El ledger hash-encadenado demuestra que **nadie ha alterado un bloque sin romper la cadena**, pero quien
@@ -370,18 +402,23 @@ uasi_v5_repo/
 │   ├── core/                # config, excepciones, registro (log JSON), utilidades
 │   ├── esquemas/            # solicitudes v1/v5 · jev.py (SolicitudJEV / RespuestaJEV)
 │   ├── seguridad/           # JWT, gobernanza, límites, jev_firma.py (HMAC-SHA256)
-│   ├── persistencia/        # almacén de modelos (checksum/HMAC + locks)
+│   ├── persistencia/        # almacén de modelos (joblib + manifiesto HMAC-SHA256 + locks)
+│   ├── db/                  # SQLAlchemy: modelos, sesión (get_db, DATABASE_URL) y migraciones
 │   ├── ml/                  # evaluación + agentes ML (legacy, profundo, evolutivo, ensamblado, streaming, metacognitivo)
 │   ├── orquestacion/        # OrquestadorSemanticoUASI
 │   ├── agentes_jev/         # base, dispatcher y 7 agentes por lenguaje
-│   ├── auditoria/           # ledger hash-encadenado + Merkle/OpenTimestamps
-│   └── api/                 # app (lifespan), manejadores y rutas (auth, v1, v5, jev, auditoría, salud)
+│   ├── auditoria/           # ledger append-only (SQL/JSONL) + Merkle/OpenTimestamps
+│   └── api/                 # app (lifespan, WebSocket /ws/agents), manejadores y rutas (auth, v1, v5, jev, auditoría, salud, admin)
 ├── tests/
 │   ├── __init__.py
 │   ├── conftest.py          # path, alias del módulo histórico y fixtures
 │   ├── test_uasi_v5.py      # 18 tests (suite original)
 │   ├── test_jev.py          # 12 tests de la capa JEV
-│   └── test_jev_automatizacion.py  # 17 tests: anti-replay, caché, lotes, métricas, callbacks, SDK
+│   ├── test_jev_automatizacion.py  # 17 tests: anti-replay, caché, lotes, métricas, callbacks, SDK
+│   ├── test_almacen_modelos.py     # joblib + manifiesto HMAC, rechazo de pickle/manipulación
+│   ├── test_ledger_integridad.py   # cadena SHA-256, manipulación detectada, append-only
+│   ├── test_admin_endpoints.py     # API admin, WebSocket, rate limiting, validación de secretos
+│   └── test_metricas_privadas.py   # ruido gaussiano (ε, δ) y ausencia de gradientes/pesos
 ├── clientes/
 │   ├── python/jev_cliente.py       # SDK de referencia JEV (stdlib)
 │   └── typescript/jevCliente.ts    # SDK de referencia JEV (Node ≥ 18)
@@ -420,7 +457,7 @@ make help         # lista todos los targets
 - [`docs/arquitectura.md`](docs/arquitectura.md): componentes, flujos y decisiones de diseño.
 - [`docs/api_reference.md`](docs/api_reference.md): referencia completa de la API.
 - [`docs/bitcoin_opentimestamps.md`](docs/bitcoin_opentimestamps.md): OpenTimestamps, OP_RETURN y verificación a largo plazo.
-- [`CHANGELOG.md`](CHANGELOG.md): historial de versiones (de la v1.0 a la v5.2.2-enterprise).
+- [`CHANGELOG.md`](CHANGELOG.md): historial de versiones (de la v1.0 a la v5.3.0-enterprise).
 
 ## Licencia
 

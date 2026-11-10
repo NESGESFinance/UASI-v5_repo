@@ -6,6 +6,60 @@ sigue [Versionado Semántico](https://semver.org/lang/es/).
 
 ---
 
+## [5.3.0-enterprise] - 2026-11-10
+
+Backend seguro, capa de datos SQLAlchemy, API de administración y WebSocket de estado de agentes.
+Incluye todos los cambios de 5.2.1 (PyJWT) y 5.2.2 (Redis + CI).
+
+### Seguridad
+- **CRÍTICO · Persistencia de modelos sin pickle.** `persistencia/almacen_modelos.py` serializa con `joblib` y escribe
+  junto a cada modelo un manifiesto `<modelo>.joblib.manifest.json` (formato `uasi-modelo-joblib-hmac/1`) con
+  `{path, sha256, hmac, timestamp, version}`. El HMAC-SHA256 (clave `SECRET_KEY`) se verifica en tiempo constante
+  **antes** de llamar a `joblib.load`; los artefactos sin manifiesto, con manifiesto alterado o con contenido
+  modificado se rechazan con `IntegridadModeloError` y nunca se deserializan. No se usa `pickle` en ningún módulo.
+- **CRÍTICO · Autenticación/autorización en todos los entornos.** Todos los endpoints de negocio exigen JWT (PyJWT)
+  también en producción. Nuevos alcances (`scope`): `uasi:full` y `admin`; dependencia `require_scope` /
+  `require_admin`. Revocación de tokens por `jti` persistida en la tabla `revoked_tokens`.
+- **ALTO · Privacidad diferencial en métricas.** `ml/evaluacion.py` añade `MetricasPrivadas.publicar(metrica,
+  sensibilidad)` (mecanismo gaussiano, ε=1.0, δ=1e-5, σ = Δ·√(2·ln(1,25/δ))/ε) y `privatizar_resultado`, que elimina
+  pesos, gradientes, estado del optimizador e historial de pérdidas de las respuestas de `/api/v1` y `/api/v5` y del
+  ledger. La sensibilidad por defecto es Δ = 1/n_evaluadas.
+- **ALTO · Ledger append-only verificable.** Nuevo `LedgerInmutableSQL` (tabla `ledger_entries`) con
+  `hash_actual = SHA-256(hash_anterior | timestamp | evento | actor | datos_json)` y génesis `"0"*64`.
+  `verificar_integridad()` recorre toda la cadena. UPDATE/DELETE se bloquean a nivel ORM (listeners) y de base de
+  datos (triggers en SQLite y PostgreSQL).
+- **MEDIO · Rate limiting distribuido.** `LimiteTasaDistribuidoMiddleware` con contadores Redis compartidos entre
+  workers (ventana fija de 60 s, `INCR` + `EXPIRE`): 30 req/min por IP en `/api/v5/jev*` y 100 req/min en
+  `/api/v5/admin/*`. Si Redis no responde, se usa un contador en memoria. Respuestas 429 con `Retry-After` y
+  cabeceras `X-RateLimit-*`.
+- **MEDIO · Validación estricta de secretos al arranque.** `core/config.validar_secretos()` exige `SECRET_KEY` y
+  `SECRET_JWT_KEY` (alias `JWT_SECRET`) de ≥ 32 caracteres, distintos entre sí, sin valores por defecto/de ejemplo y
+  con entropía mínima; en producción son obligatorios. Cualquier fallo lanza `RuntimeError` y la aplicación no arranca.
+
+### Añadido
+- Paquete `src/uasi_v5/db/`: `modelos.py` (`LedgerEntry`, `AgentMetric`, `RevokedToken`, `AdminSession`),
+  `sesion.py` (`get_db()` como dependencia FastAPI, `DATABASE_URL` SQLite/PostgreSQL) y `migraciones/m0001_inicial.py`.
+- API de administración `/api/v5/admin/*` (scope `admin`): `GET agents`, `GET metrics`, `GET ledger?page&limit`
+  (con verificación de integridad), `POST anchor`, `GET health/detailed` y `POST tokens/revoke`.
+- WebSocket `/ws/agents?token=<JWT>`: emite `{"tipo": "estado_agentes", "timestamp", "agentes": [...]}` cada
+  `UASI_WS_INTERVALO_SEGUNDOS` (5 s); cierra con código 1008 si el token falta, es inválido o caduca.
+- Métricas HTTP (latencia p50/p95/p99, errores 4xx/5xx, throughput) y persistencia de métricas por agente JEV (`agent_metrics`).
+- `/api/v5/token` acepta `alcance=uasi:full admin` (solo en desarrollo).
+- Tests: `test_almacen_modelos.py`, `test_ledger_integridad.py`, `test_admin_endpoints.py`,
+  `test_metricas_privadas.py` (40 tests nuevos; total 92 passed, 1 skipped).
+- Nuevas variables: `SECRET_KEY`, `DATABASE_URL`, `UASI_LEDGER_BACKEND`, `RATE_LIMIT_JEV_PER_MINUTE`,
+  `RATE_LIMIT_ADMIN_PER_MINUTE`, `UASI_DP_ACTIVA`, `UASI_DP_EPSILON`, `UASI_DP_DELTA`, `UASI_WS_INTERVALO_SEGUNDOS`.
+- Dependencia `SQLAlchemy==2.1.8`.
+
+### Cambiado
+- El ledger por defecto pasa a ser SQL (`UASI_LEDGER_BACKEND=sql`); `jsonl` mantiene el ledger heredado.
+- Las métricas de los agentes ML se publican con ruido gaussiano y metadatos `privacidad_diferencial`.
+
+### Cambios incompatibles
+- Los modelos guardados con el formato anterior (`.sha256`/pickle) dejan de validar: hay que reentrenarlos.
+- El ledger JSONL existente no se migra automáticamente al backend SQL.
+- La aplicación ya no arranca con secretos débiles o de ejemplo (incluido el `UASI_MODEL_HMAC_KEY` de `.env.example`).
+
 ## [5.2.2-enterprise] - 2026-10-18
 
 Estado JEV compartido entre workers, integración continua y limpieza de lint. No cambia la API.
@@ -213,6 +267,7 @@ Revisión correctiva **P1 + P2 + P3**, basada en el informe técnico ejecutivo s
 - Endpoint `POST /api/v1/procesar`.
 - `GuardiánAuditoríaLegacy`: registro en JSON plano, sin encadenamiento hash.
 
+[5.3.0-enterprise]: #530-enterprise---2026-11-10
 [5.2.2-enterprise]: #522-enterprise---2026-10-18
 [5.2.1-enterprise]: #521-enterprise---2026-10-18
 [5.2.0-enterprise]: #520-enterprise---2026-10-16

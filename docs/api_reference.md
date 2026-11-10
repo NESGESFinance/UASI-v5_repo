@@ -1,4 +1,4 @@
-# Referencia de la API · UASI v5 Enterprise (5.2.2-enterprise)
+# Referencia de la API · UASI v5 Enterprise (5.3.0-enterprise)
 
 - **URL base:** `http://<host>:8000`. Puerto por defecto: `PORT=8000`.
 - **Formato:** JSON (`Content-Type: application/json`), con fechas en ISO 8601 UTC.
@@ -23,6 +23,13 @@
 | 10 | POST | [`/api/v5/jev-dispatch/lote`](#10-post-apiv5jev-dispatchlote) | Bearer + HMAC JEV | Lote de solicitudes JEV. |
 | 11 | GET | [`/api/v5/jev/agentes`](#11-get-apiv5jevagentes) | Bearer | Lenguajes, tareas y configuración JEV. |
 | 12 | GET | [`/api/v5/jev/metricas`](#12-get-apiv5jevmetricas) | Bearer | Métricas de la capa JEV. |
+| 13 | GET | [`/api/v5/admin/agents`](#13-get-apiv5adminagents) | Bearer · scope `admin` | Sub-agentes con estado, latencia y errores 24 h. |
+| 14 | GET | [`/api/v5/admin/metrics`](#14-get-apiv5adminmetrics) | Bearer · scope `admin` | Métricas del sistema. |
+| 15 | GET | [`/api/v5/admin/ledger`](#15-get-apiv5adminledger) | Bearer · scope `admin` | Ledger paginado + integridad. |
+| 16 | POST | [`/api/v5/admin/anchor`](#16-post-apiv5adminanchor) | Bearer · scope `admin` | Anclaje manual Merkle → Bitcoin (OTS). |
+| 17 | GET | [`/api/v5/admin/health/detailed`](#17-get-apiv5adminhealthdetailed) | Bearer · scope `admin` | Salud con dependencias (Redis, BD, JEV). |
+| 18 | POST | [`/api/v5/admin/tokens/revoke`](#18-post-apiv5admintokensrevoke) | Bearer · scope `admin` | Revoca un JWT por `jti`. |
+| 19 | WS | [`/ws/agents`](#19-ws-wsagents) | `?token=<JWT>` | Estado de agentes en tiempo real. |
 
 ---
 
@@ -37,6 +44,11 @@ Authorization: Bearer <JWT>
 - Algoritmo `JWT_ALGORITHM` (HS256 por defecto), firmado con `SECRET_JWT_KEY`.
 - Claims obligatorios: `iss` (= `JWT_ISSUER`, por defecto `uasi-v5`), `sub`, `iat` y `exp`. También se emiten `scope` y `jti`.
 - El `sub` se registra como `actor` en cada bloque del ledger.
+- **Alcances (v5.3.0):** `uasi:full` da acceso a los endpoints de negocio; las rutas `/api/v5/admin/*` exigen
+  además `admin` en el claim `scope` (separado por espacios). Sin token → 401; token sin `admin` → 403.
+- Los tokens revocados (`jti` en la tabla `revoked_tokens`) se rechazan con 401.
+- **Rate limiting distribuido:** 30 req/min por IP en `/api/v5/jev*` y 100 req/min en `/api/v5/admin/*`
+  (`RATE_LIMIT_JEV_PER_MINUTE` / `RATE_LIMIT_ADMIN_PER_MINUTE`). Exceso → 429 con `Retry-After`.
 
 Preparación común para los ejemplos:
 
@@ -585,3 +597,82 @@ Devuelve `por_lenguaje` (`ejecuciones`, `exitos`, `errores`, `aciertos_cache`, `
 `por_tipo_tarea`, `rechazos` (`firma_invalida`, `sin_configurar`, `fuera_de_ventana`, `replay_conflicto`,
 `validacion`, `gobernanza`), `respuestas_idempotentes`, `callbacks` y `cache` (incluye `backend`: `redis` o `memoria`). Con `RATE_LIMIT_STORAGE_URI=redis://...`
 las métricas se agregan entre todos los workers/réplicas; con `memory://` son por proceso.
+
+---
+
+## 13. GET `/api/v5/admin/agents`
+
+Lista los agentes JEV (por lenguaje) y los agentes ML persistidos.
+
+```json
+{
+  "timestamp": "2026-11-10T15:00:00+00:00",
+  "total": 10,
+  "agentes": [
+    {"id": "jev:python", "nombre": "AgentePython", "tipo": "jev", "estado": "activo",
+     "ultima_actividad": "2026-11-10T14:59:12+00:00", "ejecuciones_24h": 42, "errores_24h": 0,
+     "latencia_media_ms": 3.1},
+    {"id": "ml:<modelo>", "nombre": "<modelo>", "tipo": "ml", "estado": "no_entrenado",
+     "ultima_actividad": null, "ejecuciones_24h": null, "errores_24h": null, "latencia_media_ms": null}
+  ]
+}
+```
+
+Estados JEV: `activo`, `inactivo` (sin ejecuciones en 24 h) y `degradado` (tasa de error 24 h > 50 %).
+Estados ML: `entrenado`, `no_entrenado` e `integridad_comprometida` (manifiesto HMAC inválido).
+Las métricas salen de la tabla `agent_metrics`.
+
+## 14. GET `/api/v5/admin/metrics`
+
+Devuelve `version`, `http` (por worker: `peticiones_totales`, `errores_4xx`, `errores_5xx`, `tasa_error_5xx`,
+`throughput_rpm_ultimo_minuto` y `latencia_ms` con media, p50, p95 y p99), `jev`
+(métricas de la capa JEV), `agentes_jev_24h` (`ejecuciones`, `errores`), `ledger.bloques`, `base_datos`
+(recuentos de `agent_metrics`, `revoked_tokens`, `admin_sessions`) y `rate_limiting` (`backend`: `redis` o
+`memoria`, y los límites por minuto).
+
+## 15. GET `/api/v5/admin/ledger`
+
+| Parámetro | Tipo | Defecto | Descripción |
+|---|---|---|---|
+| `page` | int ≥ 1 | `1` | Página. |
+| `limit` | int 1–200 | `50` | Entradas por página. |
+
+Respuesta: `pagina`, `tamano_pagina`, `total_bloques`, `total_paginas`, `bloques` e `integridad`
+(resultado de `verificar_integridad()`: `integro`, `bloques` y, si falla, `error`). Cada bloque incluye
+`id`, `timestamp`, `evento`, `actor`, `datos`, `hash_anterior` y `hash_actual`, con
+`hash_actual = SHA-256(hash_anterior | timestamp | evento | actor | datos_json)` y génesis `"0"*64`.
+
+## 16. POST `/api/v5/admin/anchor`
+
+Cuerpo opcional `{"fecha": "YYYY-MM-DD"}` (por defecto, hoy en UTC). Calcula la raíz de Merkle del día,
+la sella con los calendarios OpenTimestamps y registra `ANCLAJE_MERKLE_OTS` en el ledger. Misma respuesta
+que [`/api/v5/merkle-anchor`](#7-get-apiv5merkle-anchor).
+
+## 17. GET `/api/v5/admin/health/detailed`
+
+Amplía `/api/v5/health` con `componentes.redis` (`estado`: `ok`, `error` o `no_configurado`, y `latencia_ms`),
+`componentes.base_datos`, `componentes.agentes_jev` (`registrados`, `degradados`, `agentes`) y
+`componentes.rate_limiting`. Devuelve **503** si el estado global es `critico` (p. ej., base de datos caída).
+
+## 18. POST `/api/v5/admin/tokens/revoke`
+
+Cuerpo: `{"jti": "<id del token>", "sujeto": "opcional", "motivo": "opcional"}`. Respuesta:
+`{"jti": "...", "revocado": true, "ya_estaba_revocado": false}`. La revocación se registra en el ledger
+(`REVOCACION_TOKEN`).
+
+## 19. WS `/ws/agents`
+
+Conexión: `ws://<host>:8000/ws/agents?token=<JWT>`. Cada `UASI_WS_INTERVALO_SEGUNDOS` (5 s) se emite:
+
+```json
+{
+  "tipo": "estado_agentes",
+  "timestamp": "2026-11-10T15:00:05+00:00",
+  "agentes": [
+    {"id": "jev:python", "nombre": "AgentePython", "estado": "activo", "ultima_actividad": "2026-11-10T14:59:12+00:00"}
+  ]
+}
+```
+
+El servidor cierra con código **1008** (*policy violation*) si el token falta, es inválido, está revocado o caduca
+durante la conexión.

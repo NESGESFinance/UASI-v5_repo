@@ -34,6 +34,14 @@ async def merkle_anchor(
     fecha: Optional[str] = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$", description="Por defecto: hoy (UTC)."),
     claims: Dict[str, Any] = Depends(require_auth),
 ) -> Dict[str, Any]:
+    return await ejecutar_anclaje(fecha, claims["sub"])
+
+
+async def ejecutar_anclaje(fecha: Optional[str], actor: str) -> Dict[str, Any]:
+    """Raíz de Merkle de los bloques del día → anclar_en_bitcoin() (OTS) → bloque ANCLAJE_MERKLE_OTS.
+
+    Compartido por GET /api/v5/merkle-anchor (scripts/anclar_ledger_bitcoin.sh) y POST /api/v5/admin/anchor.
+    """
     fecha = fecha or ahora_utc().date().isoformat()
     bloques = await run_in_threadpool(ledger.bloques_de_fecha, fecha)
     if not bloques:
@@ -42,7 +50,7 @@ async def merkle_anchor(
     resultado = await merkle_manager.anclar_en_bitcoin(raiz, fecha, n_bloques=len(bloques))
     await run_in_threadpool(ledger.registrar, "ANCLAJE_MERKLE_OTS", {
         "fecha": fecha, "raiz_merkle": raiz, "n_bloques": len(bloques), "estado": resultado.get("estado"),
-        "calendarios": resultado.get("calendarios") or resultado.get("calendarios_aceptados")}, claims["sub"])
+        "calendarios": resultado.get("calendarios") or resultado.get("calendarios_aceptados")}, actor)
     return {"fecha": fecha, "raiz_merkle": raiz, "n_bloques": len(bloques), "anclaje": resultado}
 
 

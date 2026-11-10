@@ -17,7 +17,7 @@ from uasi_v5.ml.agentes.legacy import (
     AgenteSVMLegacy,
     _AgenteLegacyBase,
 )
-from uasi_v5.ml.evaluacion import semilla_desde_contexto
+from uasi_v5.ml.evaluacion import privatizar_resultado, semilla_desde_contexto
 from uasi_v5.seguridad.autenticacion import require_auth
 from uasi_v5.seguridad.gobernanza import guardian
 from uasi_v5.servicios import ledger
@@ -37,7 +37,9 @@ async def procesar_v1(sol: SolicitudProcesamientoV1, claims: Dict[str, Any] = De
     meta = guardian.validar_metadatos(sol.metadatos_contexto)
     X, informe = guardian.sanitizar_matriz(sol.inputs)
     y = np.asarray(sol.targets, dtype=int)
-    resultado = await run_in_threadpool(AGENTES_V1[sol.tipo_agente]().entrenar, X, y, semilla_desde_contexto(meta))
+    bruto = await run_in_threadpool(AGENTES_V1[sol.tipo_agente]().entrenar, X, y, semilla_desde_contexto(meta))
+    # Lo publicado (respuesta y ledger, ambos expuestos por API) va con privacidad diferencial.
+    resultado = privatizar_resultado(bruto, int(X.shape[0]))
     bloque = await run_in_threadpool(ledger.registrar, "PROCESAMIENTO_V1", {
         "id_solicitud": sol.id_solicitud, "intencion": intencion, "agente": resultado["agente"],
         "hash_datos": sha256_hex(X.tobytes() + y.tobytes()), "n_muestras": int(X.shape[0]),

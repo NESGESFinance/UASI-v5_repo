@@ -32,7 +32,14 @@ from uasi_v5.seguridad.autenticacion import require_auth
 from uasi_v5.seguridad.gobernanza import guardian
 from uasi_v5.seguridad.jev_firma import firmar_jev, jev_configurado, verificar_firma_jev
 from uasi_v5.seguridad.jev_replay import hash_cuerpo, ventana_segundos, verificar_ventana
-from uasi_v5.servicios import cache_jev, dispatcher_jev, idempotencia_jev, ledger, metricas_jev
+from uasi_v5.servicios import (
+    cache_jev,
+    dispatcher_jev,
+    idempotencia_jev,
+    ledger,
+    metricas_jev,
+    registrar_metricas_agentes,
+)
 
 router = APIRouter(tags=["jev"])
 
@@ -107,6 +114,7 @@ async def _procesar(cuerpo: dict[str, Any], sol: SolicitudJEV, actor: str) -> tu
             idempotencia_jev.liberar(id_idem)
         raise
     metricas_jev.registrar_despacho(sol.tipo_tarea, despacho["estado"], resultados.values())
+    await run_in_threadpool(registrar_metricas_agentes, sol.tipo_tarea, list(resultados.values()))
     if id_idem is not None:
         idempotencia_jev.completar(id_idem, huella, contenido)
     return contenido, False

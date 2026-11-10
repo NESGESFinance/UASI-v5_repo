@@ -16,9 +16,11 @@ router = APIRouter(tags=["auth"])
 async def emitir_token_desarrollo(
     sujeto: str = Query("desarrollador", pattern=r"^[A-Za-z0-9_.@\-]{1,64}$"),
     minutos: int = Query(JWT_EXP_MINUTES, ge=1, le=1440),
+    alcance: str = Query("uasi:full", pattern=r"^uasi:full( admin)?$",
+                         description="'uasi:full' o 'uasi:full admin' (endpoints /api/v5/admin/*)."),
 ) -> Dict[str, Any]:
     """Token de PRUEBA. Solo existe si SECRET_JWT_KEY está definida y UASI_ENV != production."""
     if not SECRET_JWT_KEY or UASI_ENV == "production":
         raise HTTPException(status_code=404, detail="Not Found")
-    return {"access_token": emitir_token(sujeto, minutos), "token_type": "bearer",
+    return {"access_token": emitir_token(sujeto, minutos, alcance=alcance), "token_type": "bearer", "scope": alcance,
             "expira_en_minutos": minutos, "advertencia": "Solo para desarrollo."}

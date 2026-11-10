@@ -94,3 +94,105 @@ def entrenar_y_evaluar_sklearn(fabrica: Callable[[], Any], X: np.ndarray, y: np.
     metricas["conjunto_evaluacion"] = conjunto
     modelo_final = fabrica().fit(X, y) if conjunto.startswith("holdout") else modelo_eval
     return modelo_final, metricas
+
+
+# --- Privacidad diferencial (mecanismo gaussiano) -------------------------------------------
+# Claves que NUNCA salen por la API: parámetros, gradientes, estados de optimizador e
+# historiales de entrenamiento (memorizan información de las muestras de entrenamiento).
+_FRAGMENTOS_PROHIBIDOS = ("peso", "weight", "gradiente", "gradient", "coef", "intercept", "adam",
+                          "estado_optimizador", "historial", "evolucion_fitness", "loss", "perdida")
+# Métricas acotadas en [0, 1] que se publican con ruido calibrado.
+_METRICAS_ACOTADAS = ("accuracy", "precision", "recall", "f1", "auc", "exactitud")
+
+
+class MetricasPrivadas:
+    """
+    Publicación (ε, δ)-diferencialmente privada de métricas escalares (mecanismo gaussiano).
+
+        σ = Δ · √(2 · ln(1.25 / δ)) / ε          (Dwork & Roth 2014, Teorema A.1, ε ∈ (0, 1])
+
+    `sensibilidad` (Δ) es la sensibilidad L2 de la métrica: para una proporción calculada
+    sobre n muestras (accuracy, precision, recall…) Δ = 1/n. Cada llamada a `publicar`
+    consume ε del presupuesto (composición básica); `epsilon_consumido` lo contabiliza.
+    """
+
+    def __init__(self, epsilon: float = 1.0, delta: float = 1e-5, semilla: Optional[int] = None) -> None:
+        if not 0 < epsilon <= 1.0:
+            raise ValueError("El mecanismo gaussiano clásico requiere 0 < ε ≤ 1.")
+        if not 0 < delta < 1:
+            raise ValueError("δ debe estar en (0, 1).")
+        self.epsilon = float(epsilon)
+        self.delta = float(delta)
+        self.epsilon_consumido = 0.0
+        self.publicaciones = 0
+        self._rng = np.random.default_rng(semilla)  # semilla=None ⇒ entropía del sistema operativo
+
+    def sigma(self, sensibilidad: float) -> float:
+        return float(sensibilidad) * math.sqrt(2.0 * math.log(1.25 / self.delta)) / self.epsilon
+
+    def publicar(self, metrica: float, sensibilidad: float, acotar: Optional[Tuple[float, float]] = (0.0, 1.0)) -> float:
+        """Devuelve `metrica + N(0, σ²)`; el recorte posterior a [0, 1] no consume privacidad."""
+        if sensibilidad <= 0:
+            raise ValueError("La sensibilidad debe ser positiva.")
+        ruidosa = float(metrica) + float(self._rng.normal(0.0, self.sigma(sensibilidad)))
+        self.epsilon_consumido += self.epsilon
+        self.publicaciones += 1
+        if acotar is not None:
+            ruidosa = min(max(ruidosa, acotar[0]), acotar[1])
+        return round(ruidosa, 6)
+
+
+def _clave_prohibida(clave: str) -> bool:
+    c = clave.lower()
+    return any(f in c for f in _FRAGMENTOS_PROHIBIDOS)
+
+
+def _es_metrica_acotada(clave: str, valor: Any) -> bool:
+    c = clave.lower()
+    return (isinstance(valor, (int, float)) and not isinstance(valor, bool) and 0.0 <= float(valor) <= 1.0
+            and any(f in c for f in _METRICAS_ACOTADAS))
+
+
+def privatizar_resultado(resultado: Any, n_muestras: int, epsilon: Optional[float] = None,
+                         delta: Optional[float] = None, activa: Optional[bool] = None) -> Any:
+    """
+    Prepara un resultado de agente para publicarlo por la API (y en el ledger, que también se expone):
+    - Elimina recursivamente pesos, gradientes, estados de optimizador, pérdidas e historiales.
+    - Añade ruido gaussiano calibrado (Δ = 1/n) a toda métrica acotada en [0, 1].
+    - Añade `privacidad_diferencial` con ε por métrica, δ y ε total (composición básica).
+    """
+    from uasi_v5.core import config
+
+    activa = config.UASI_DP_ACTIVA if activa is None else activa
+    if not isinstance(resultado, dict):
+        return resultado
+    mecanismo = MetricasPrivadas(epsilon=config.UASI_DP_EPSILON if epsilon is None else epsilon,
+                                 delta=config.UASI_DP_DELTA if delta is None else delta)
+    metricas = resultado.get("metricas")
+    n_eval = metricas.get("n_evaluadas") if isinstance(metricas, dict) else None
+    # Δ = 1/n sobre el conjunto con el que realmente se calculó la métrica (hold-out si existe).
+    sensibilidad = 1.0 / max(1, int(n_eval if isinstance(n_eval, int) and n_eval > 0 else n_muestras))
+
+    def _recorrer(nodo: Any) -> Any:
+        if isinstance(nodo, dict):
+            salida: Dict[str, Any] = {}
+            for k, v in nodo.items():
+                if _clave_prohibida(str(k)):
+                    continue
+                if activa and _es_metrica_acotada(str(k), v):
+                    salida[k] = mecanismo.publicar(float(v), sensibilidad)
+                else:
+                    salida[k] = _recorrer(v)
+            return salida
+        if isinstance(nodo, list):
+            return [_recorrer(x) for x in nodo]
+        return nodo
+
+    publico = _recorrer(resultado)
+    publico["privacidad_diferencial"] = {
+        "activa": bool(activa), "mecanismo": "gaussiano", "epsilon_por_metrica": mecanismo.epsilon,
+        "delta": mecanismo.delta, "sensibilidad": round(sensibilidad, 8),
+        "metricas_privatizadas": mecanismo.publicaciones,
+        "epsilon_total_composicion_basica": round(mecanismo.epsilon_consumido, 6),
+    }
+    return publico

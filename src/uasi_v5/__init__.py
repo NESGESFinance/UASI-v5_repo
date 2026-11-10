@@ -20,10 +20,12 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-__version__ = "5.2.2-enterprise"
+__version__ = "5.3.0-enterprise"
+VERSION = __version__
 
 __all__ = [
     "__version__",
+    "VERSION",
     # Aplicación y seguridad
     "app",
     "emitir_token",
@@ -59,7 +61,7 @@ __all__ = [
 
 
 def __getattr__(nombre: str) -> Any:
-    if nombre in __all__:
+    if nombre in __all__ and nombre not in ("__version__", "VERSION"):
         return getattr(importlib.import_module("uasi_v5.main"), nombre)
     raise AttributeError(f"module 'uasi_v5' has no attribute {nombre!r}")
 

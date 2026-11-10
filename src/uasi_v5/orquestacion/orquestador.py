@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import numpy as np
 
-from uasi_v5.auditoria.ledger import LedgerAuditoriaCriptografica
+from uasi_v5.auditoria.ledger import LedgerAuditoriaCriptografica, LedgerInmutableSQL
 from uasi_v5.auditoria.merkle_ots import MerkleOpenTimestampsManager
 from uasi_v5.core.excepciones import ErrorValidacionDatos
 from uasi_v5.core.utilidades import ahora_utc, sha256_hex
@@ -46,7 +46,7 @@ class OrquestadorSemanticoUASI:
 
     def __init__(
         self,
-        ledger_ref: Optional[LedgerAuditoriaCriptografica] = None,
+        ledger_ref: Optional[LedgerAuditoriaCriptografica | LedgerInmutableSQL] = None,
         guardian_ref: Optional[GuardiánGobernanzaSeguridad] = None,
         salud: Optional[Callable[[], Dict[str, Any]]] = None,
     ) -> None:
@@ -56,7 +56,7 @@ class OrquestadorSemanticoUASI:
         self.analista = AgenteAnalistaDatosMetacognitivo()
 
     @property
-    def ledger(self) -> LedgerAuditoriaCriptografica:
+    def ledger(self) -> LedgerAuditoriaCriptografica | LedgerInmutableSQL:
         if self._ledger is None:
             from uasi_v5 import servicios
 

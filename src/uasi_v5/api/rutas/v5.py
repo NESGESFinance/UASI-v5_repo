@@ -12,7 +12,7 @@ from starlette.concurrency import run_in_threadpool
 from uasi_v5.core.utilidades import ahora_utc, sha256_hex
 from uasi_v5.esquemas.solicitudes import SolicitudMaestraV5, SolicitudStreaming
 from uasi_v5.ml.agentes.streaming import MotorStreamingContinuo
-from uasi_v5.ml.evaluacion import semilla_desde_contexto
+from uasi_v5.ml.evaluacion import privatizar_resultado, semilla_desde_contexto
 from uasi_v5.seguridad.autenticacion import require_auth
 from uasi_v5.seguridad.gobernanza import guardian
 from uasi_v5.servicios import ledger, orquestador
@@ -25,6 +25,8 @@ async def uasi_master_execute(sol: SolicitudMaestraV5, claims: Dict[str, Any] = 
     categorias = guardian.clasificar_prompt_master(sol.prompt_intencion)
     meta = guardian.validar_metadatos(sol.metadatos_contexto)
     salida = await run_in_threadpool(orquestador.ejecutar, sol, categorias, meta)
+    if isinstance(salida.get("resultado"), dict):
+        salida["resultado"] = privatizar_resultado(salida["resultado"], len(sol.inputs or []))
     resultado = salida.get("resultado", {})
     bloque = await run_in_threadpool(ledger.registrar, "EJECUCION_MAESTRA_V5", {
         "id_solicitud": sol.id_solicitud, "plan": salida["plan"], "ruta": salida.get("ruta_ejecutada"),
@@ -40,8 +42,9 @@ async def streaming_ingest(sol: SolicitudStreaming, claims: Dict[str, Any] = Dep
     meta = guardian.validar_metadatos(sol.metadatos_contexto)
     X, informe = guardian.sanitizar_matriz(sol.inputs)
     y = np.asarray(sol.targets, dtype=int)
-    resultado = await run_in_threadpool(MotorStreamingContinuo().ingerir, X, y, sol.clases_declaradas,
-                                        sol.reiniciar_modelo, semilla_desde_contexto(meta))
+    bruto = await run_in_threadpool(MotorStreamingContinuo().ingerir, X, y, sol.clases_declaradas,
+                                    sol.reiniciar_modelo, semilla_desde_contexto(meta))
+    resultado = privatizar_resultado(bruto, int(X.shape[0]))
     bloque = await run_in_threadpool(ledger.registrar, "INGESTA_STREAMING", {
         "id_solicitud": sol.id_solicitud, "hash_datos": sha256_hex(X.tobytes() + y.tobytes()),
         "n_muestras": int(X.shape[0]), "version_modelo": resultado["version_modelo"],

@@ -268,6 +268,24 @@ BackendJEV = tuple[
 ]
 
 
+def conectar_redis(uri: str | None) -> Any | None:
+    """Cliente Redis verificado con PING, o None si la URI no es redis:// o el servidor no responde.
+
+    Compartido por el backend JEV y el rate limiting distribuido (`seguridad/limites.py`).
+    """
+    if not uri or not uri.startswith(ESQUEMAS_REDIS):
+        return None
+    try:
+        import redis
+
+        cliente = redis.Redis.from_url(uri, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
+        cliente.ping()
+        return cliente
+    except Exception as exc:  # noqa: BLE001 - ImportError, ConnectionError, URI inválida…: degradar a memoria
+        logger.warning("Redis no disponible en %s (%s).", uri.split("@")[-1], type(exc).__name__)
+        return None
+
+
 def _backend_memoria(max_entradas: int, ttl_segundos: float) -> BackendJEV:
     return (CacheResultadosJEV(max_entradas=max_entradas, ttl_segundos=ttl_segundos), MetricasJEV(),
             RegistroIdempotenciaJEV())
@@ -287,14 +305,10 @@ def crear_backend_jev(uri: str | None, max_entradas: int | None = None,
                        "la caché, la idempotencia y las métricas JEV no se comparten.")
         return _backend_memoria(max_entradas, ttl_segundos)
 
-    try:
-        import redis
-
-        cliente = redis.Redis.from_url(uri, decode_responses=True, socket_connect_timeout=2, socket_timeout=2)
-        cliente.ping()
-    except Exception as exc:  # noqa: BLE001 - ImportError, ConnectionError, URI inválida…: degradar a memoria
-        logger.warning("Redis no disponible para JEV (%s); se usa el backend en memoria. Con varios workers "
-                       "la caché, la idempotencia y las métricas JEV no se comparten.", type(exc).__name__)
+    cliente = conectar_redis(uri)
+    if cliente is None:
+        logger.warning("Redis no disponible para JEV; se usa el backend en memoria. Con varios workers "
+                       "la caché, la idempotencia y las métricas JEV no se comparten.")
         return _backend_memoria(max_entradas, ttl_segundos)
 
     logger.info("Backend JEV en Redis: caché, idempotencia y métricas compartidas entre workers.")
