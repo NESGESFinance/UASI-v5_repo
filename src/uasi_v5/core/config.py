@@ -20,7 +20,7 @@ def _env_float(nombre: str, defecto: float) -> float:
 
 
 # --- Constantes de configuración (todas sobreescribibles por entorno) ---------
-VERSION_UASI = "5.4.0-enterprise"
+VERSION_UASI = "5.5.0-enterprise"
 UASI_ENV = os.getenv("UASI_ENV", "development").lower()
 PATH_WORKSPACE = os.path.abspath(os.getenv("PATH_WORKSPACE", "./uasi_workspace"))
 PATH_MODELOS = os.path.join(PATH_WORKSPACE, "modelos")
@@ -92,6 +92,13 @@ ESPLORA_API_URL = os.getenv(
     "ESPLORA_API_URL",
     "https://blockstream.info/testnet/api" if BITCOIN_NETWORK == "testnet" else "https://blockstream.info/api",
 )
+
+# Integración con NESGESFinanceTrust (observación on-chain de solo lectura).
+# UASI consulta la API REST pública de NESGESFinanceTrust (runa NGF•BTC•AM, Ordinals,
+# activos RWA con cumplimiento MiCA). Si no responde, la integración degrada sin fallar.
+NGF_TRUST_API_URL = os.getenv("NGF_TRUST_API_URL", "https://nesgesfinancetrust.com/api").rstrip("/")
+NGF_TRUST_TIMEOUT_SECONDS = _env_float("NGF_TRUST_TIMEOUT_SECONDS", 8.0)
+NGF_TRUST_RUNA_PRINCIPAL = os.getenv("NGF_TRUST_RUNA_PRINCIPAL", "NGF•BTC•AM")
 
 # Umbrales metacognitivos
 UMBRAL_ENTROPIA_DESBALANCE = _env_float("UASI_UMBRAL_ENTROPIA_DESBALANCE", 0.85)
