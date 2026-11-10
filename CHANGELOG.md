@@ -6,6 +6,29 @@ sigue [Versionado Semántico](https://semver.org/lang/es/).
 
 ---
 
+## [5.5.0-enterprise] - 2026-11-10
+
+Integración de observación con NESGESFinanceTrust e integración continua (CI).
+
+### Añadido
+- **Integración NESGESFinanceTrust** (`src/uasi_v5/integraciones/nesgesfinancetrust.py`): cliente HTTP
+  asíncrono y **defensivo** que observa el ecosistema on-chain (runa `NGF•BTC•AM`, Ordinals, activos RWA
+  con cumplimiento MiCA) vía la API REST pública de NESGESFinanceTrust. Ante cualquier fallo de red devuelve
+  `conectado: false` en lugar de propagar la excepción.
+- **Endpoints `GET /api/v5/trust/estado`, `/api/v5/trust/runes`, `/api/v5/trust/rwa`** (protegidos con
+  `Bearer`). `estado` agrega salud + runa principal + activos RWA + clases MiCA.
+- **Variables de entorno** `NGF_TRUST_API_URL`, `NGF_TRUST_TIMEOUT_SECONDS`, `NGF_TRUST_RUNA_PRINCIPAL`.
+- **7 pruebas** en `tests/test_integracion_trust.py` (camino conectado, degradación sin 5xx, validación de
+  límites, autenticación obligatoria) con `httpx.MockTransport`.
+- **Integración continua** (`.github/workflows/ci.yml`): ruff + mypy + pytest en Python 3.11 y 3.12 en cada
+  push a `main` y en cada pull request.
+
+### Cambiado
+- Versión `5.4.0-enterprise` → `5.5.0-enterprise` (nueva funcionalidad, versionado semántico MINOR).
+- `docs/api_reference.md`: documentación de la integración NESGESFinanceTrust (sección 4c).
+
+---
+
 ## [5.4.0-enterprise] - 2026-11-10
 
 Capa de orquestación conversacional: UASI como única puerta de interacción agéntica.

@@ -20,7 +20,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-__version__ = "5.4.0-enterprise"
+__version__ = "5.5.0-enterprise"
 VERSION = __version__
 
 __all__ = [

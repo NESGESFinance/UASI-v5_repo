@@ -13,7 +13,18 @@ from slowapi.middleware import SlowAPIMiddleware
 from starlette.concurrency import run_in_threadpool
 
 from uasi_v5.api.manejadores import registrar_manejadores
-from uasi_v5.api.rutas import admin, auditoria, autenticacion, jev, orquestacion, salud, usuarios, v1, v5
+from uasi_v5.api.rutas import (
+    admin,
+    auditoria,
+    autenticacion,
+    jev,
+    nesgesfinancetrust,
+    orquestacion,
+    salud,
+    usuarios,
+    v1,
+    v5,
+)
 from uasi_v5.auditoria.merkle_ots import OTS_DISPONIBLE, OTS_ERROR_IMPORT
 from uasi_v5.core.config import (
     BITCOIN_NETWORK,
@@ -121,7 +132,7 @@ def crear_app() -> FastAPI:
     ])
     app.add_middleware(LimiteTamanoPayloadMiddleware, max_bytes=MAX_PAYLOAD_BYTES)
     app.add_middleware(MetricasHTTPMiddleware, metricas=metricas_http)  # el más externo
-    for modulo in (autenticacion, v1, v5, jev, orquestacion, auditoria, salud, admin, usuarios):
+    for modulo in (autenticacion, v1, v5, jev, orquestacion, nesgesfinancetrust, auditoria, salud, admin, usuarios):
         app.include_router(modulo.router)
     app.add_api_websocket_route("/ws/agents", ws_agentes)
     return app

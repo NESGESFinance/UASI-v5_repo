@@ -17,6 +17,9 @@
 | 3 | POST | [`/api/v1/procesar`](#3-post-apiv1procesar) | Bearer | Entrenamiento de agentes legacy. |
 | 4 | POST | [`/api/v5/uasi-master-execute`](#4-post-apiv5uasi-master-execute) | Bearer | Orquestador semántico. |
 | 4b | POST | [`/api/v5/orquestar`](#4b-post-apiv5orquestar) | Bearer | Consola conversacional: intención en lenguaje natural → el orquestador decide y audita. |
+| 4c | GET | [`/api/v5/trust/estado`](#4c-integración-nesgesfinancetrust) | Bearer | Observación on-chain: resumen del ecosistema NESGESFinance (runa NGF•BTC•AM, RWA/MiCA). |
+| 4d | GET | [`/api/v5/trust/runes`](#4c-integración-nesgesfinancetrust) | Bearer | Listado de runas indexadas por NESGESFinanceTrust. |
+| 4e | GET | [`/api/v5/trust/rwa`](#4c-integración-nesgesfinancetrust) | Bearer | Activos del mundo real (RWA) tokenizados. |
 | 5 | POST | [`/api/v5/streaming-ingest`](#5-post-apiv5streaming-ingest) | Bearer | Aprendizaje online incremental. |
 | 6 | GET | [`/api/v5/cryptographic-ledger`](#6-get-apiv5cryptographic-ledger) | Bearer | Ledger paginado con verificación opcional. |
 | 7 | GET | [`/api/v5/merkle-anchor`](#7-get-apiv5merkle-anchor) | Bearer | Raíz de Merkle diaria y anclaje en Bitcoin vía OTS. |
@@ -397,6 +400,57 @@ curl -s -X POST $API/api/v5/orquestar \
   "hash_bloque": "c3d4…"
 }
 ```
+
+## 4c. Integración NESGESFinanceTrust
+
+**Observación on-chain de solo lectura.** UASI consulta la API REST pública de
+[NESGESFinanceTrust](https://nesgesfinancetrust.com) para exponer, de forma auditable y protegida, el
+estado del ecosistema NESGESFinance: la runa **NGF•BTC•AM** (Runes), las inscripciones Ordinals y los
+activos del mundo real (**RWA**) con su clasificación de cumplimiento **MiCA** (EMT, ART, UTILITY, SECURITY).
+
+La integración es **defensiva**: si la plataforma externa no responde (red, DNS, 5xx, timeout), las rutas
+devuelven `conectado: false` con el detalle del error y **nunca un 5xx**, para que el panel de UASI siga
+operativo. Se configura con las variables de entorno `NGF_TRUST_API_URL` (por defecto
+`https://nesgesfinancetrust.com/api`), `NGF_TRUST_TIMEOUT_SECONDS` y `NGF_TRUST_RUNA_PRINCIPAL`.
+
+| Ruta | Descripción |
+|---|---|
+| `GET /api/v5/trust/estado` | Resumen agregado: salud + runa principal + activos RWA + clases MiCA. |
+| `GET /api/v5/trust/runes?limite=N` | Listado de runas (1 ≤ N ≤ 100, por defecto 20). |
+| `GET /api/v5/trust/rwa?limite=N` | Activos RWA tokenizados (1 ≤ N ≤ 100, por defecto 20). |
+
+- **Headers:** `Authorization: Bearer <JWT>` (cualquier usuario autenticado).
+
+```bash
+curl -s $API/api/v5/trust/estado -H "Authorization: Bearer $TOKEN"
+```
+
+**Respuesta 200 (plataforma accesible)**
+```json
+{
+  "conectado": true,
+  "api_url": "https://nesgesfinancetrust.com/api",
+  "timestamp": "2026-11-10T12:00:00+00:00",
+  "runa_principal_nombre": "NGF•BTC•AM",
+  "salud": { "status": "ok" },
+  "runa_principal": { "name": "NGF•BTC•AM", "id": "923867:120", "supply": "5930000000" },
+  "activos_rwa": { "total": 3, "por_clase": { "UTILITY": 2, "SECURITY": 1 }, "muestra": [] },
+  "cumplimiento_mica": [
+    { "clase": "EMT", "descripcion": "E-Money Token (referenciado a dinero fiat)" },
+    { "clase": "ART", "descripcion": "Asset-Referenced Token (cesta de activos)" },
+    { "clase": "UTILITY", "descripcion": "Token de utilidad fungible (Runes)" },
+    { "clase": "SECURITY", "descripcion": "Token de valor no fungible (Ordinals)" }
+  ],
+  "errores": []
+}
+```
+
+**Respuesta 200 (plataforma no accesible — degradación elegante)**
+```json
+{ "conectado": false, "activos_rwa": null, "errores": ["health: ...", "runa: ...", "rwa: ..."] }
+```
+
+---
 
 ## 5. POST `/api/v5/streaming-ingest`
 
