@@ -6,6 +6,34 @@ sigue [Versionado Semántico](https://semver.org/lang/es/).
 
 ---
 
+## [5.3.1-enterprise] - 2026-11-10
+
+Login real por usuario y contraseña, y gestión de usuarios administradores.
+
+### Añadido
+- **Login por usuario/contraseña (`POST /api/v5/token`).** Verifica las credenciales contra la nueva
+  tabla `usuarios` y devuelve un JWT firmado con los scopes del usuario. Funciona en TODOS los entornos
+  (también producción). Responde 401 genérico ("Credenciales inválidas") sin distinguir si el usuario
+  no existe, la contraseña es incorrecta o la cuenta está desactivada.
+- **Modelo `Usuario`** (tabla `usuarios`): `username` único, `password_hash`, `scopes`, `activo`
+  (borrado lógico), `creado`, `ultimo_acceso`. Se crea automáticamente al inicializar la base de datos.
+- **Hash de contraseñas con bcrypt** (`seguridad/contrasenas.py`): pre-hash SHA-256 + base64 para admitir
+  contraseñas de cualquier longitud sin el truncamiento silencioso de bcrypt a 72 bytes. Verificación en
+  tiempo constante y hash señuelo para no filtrar por tiempo qué usuarios existen.
+- **Gestión de usuarios admin (`/api/v5/admin/users/*`,** requiere scope `admin`): listar (sin exponer el
+  hash), crear (409 si existe), actualizar contraseña/scopes/estado y desactivar (borrado lógico). No se
+  permite desactivar la propia cuenta en uso.
+- **Script `scripts/crear_admin.py`:** crea o actualiza (idempotente) el administrador inicial a partir de
+  `UASI_ADMIN_USER`/`UASI_ADMIN_PASSWORD`; si no se indica contraseña, genera una aleatoria segura y la
+  imprime una sola vez. Opción `--reset-password`.
+
+### Cambiado
+- `GET /api/v5/token` (token de desarrollo sin credenciales) se mantiene pero sigue restringido a
+  entornos no productivos; el login real es ahora la vía recomendada.
+- Nueva dependencia fijada: `bcrypt==5.0.0`.
+
+---
+
 ## [5.3.0-enterprise] - 2026-11-10
 
 Backend seguro, capa de datos SQLAlchemy, API de administración y WebSocket de estado de agentes.
