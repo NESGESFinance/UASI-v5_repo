@@ -16,6 +16,7 @@
 | 2b | POST | [`/api/v5/token`](#2b-post-apiv5token) | No (usuario/contraseña) | Login real: devuelve un JWT para el usuario autenticado. |
 | 3 | POST | [`/api/v1/procesar`](#3-post-apiv1procesar) | Bearer | Entrenamiento de agentes legacy. |
 | 4 | POST | [`/api/v5/uasi-master-execute`](#4-post-apiv5uasi-master-execute) | Bearer | Orquestador semántico. |
+| 4b | POST | [`/api/v5/orquestar`](#4b-post-apiv5orquestar) | Bearer | Consola conversacional: intención en lenguaje natural → el orquestador decide y audita. |
 | 5 | POST | [`/api/v5/streaming-ingest`](#5-post-apiv5streaming-ingest) | Bearer | Aprendizaje online incremental. |
 | 6 | GET | [`/api/v5/cryptographic-ledger`](#6-get-apiv5cryptographic-ledger) | Bearer | Ledger paginado con verificación opcional. |
 | 7 | GET | [`/api/v5/merkle-anchor`](#7-get-apiv5merkle-anchor) | Bearer | Raíz de Merkle diaria y anclaje en Bitcoin vía OTS. |
@@ -337,6 +338,65 @@ curl -s -X POST $API/api/v5/uasi-master-execute -H "Authorization: Bearer $TOKEN
 ```
 
 ---
+
+## 4b. POST `/api/v5/orquestar`
+
+**Capa de orquestación conversacional** y puerta única de interacción agéntica de UASI. Recibe una
+intención en lenguaje natural; el guárdian la clasifica (allow-list semántica), el orquestador elige el
+plan y, cuando el plan **no requiere datos** (diagnóstico / auditoría), lo ejecuta y responde en lenguaje
+legible. Toda interacción queda anclada en el ledger (`ORQUESTACION_INTERACCION`). A diferencia de
+`uasi-master-execute`, **nunca falla por falta de datos**: si el plan es de entrenamiento, devuelve estado
+`requiere_datos` con la guía para completarlo.
+
+- **Headers:** `Authorization: Bearer <JWT>` y `Content-Type: application/json`.
+- **Body:**
+
+| Campo | Tipo | Obligatorio | Descripción |
+|---|---|---|---|
+| `intencion` | string (3–2000) | Sí | Instrucción en lenguaje natural. |
+| `id_sesion` | string (≤128) | No | Identificador de sesión conversacional (para hilar mensajes). |
+| + campos comunes | | | `metadatos_contexto`, etc. |
+
+- **Clasificación:** mismas categorías y prioridades que `uasi-master-execute`. Un prompt que no corresponda
+  a ninguna intención permitida, o con patrones denegados (inyección), responde **403**.
+- **Estados de respuesta:** `completado` (diagnóstico / auditoría ejecutados) o `requiere_datos` (plan de ML).
+
+```bash
+curl -s -X POST $API/api/v5/orquestar \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"intencion":"haz un diagnóstico de salud del sistema","id_sesion":"consola-1"}'
+```
+
+**Respuesta 200 (plan ejecutado)**
+```json
+{
+  "id_interaccion": "3f1c…",
+  "id_sesion": "consola-1",
+  "timestamp": "2026-11-10T12:00:00+00:00",
+  "intencion": "haz un diagnóstico de salud del sistema",
+  "plan": "DIAGNOSTICO",
+  "plan_descripcion": "diagnóstico de salud del sistema y los modelos",
+  "categorias_detectadas": ["DIAGNOSTICO"],
+  "ruta_ejecutada": "diagnostico",
+  "estado": "completado",
+  "mensaje": "He ejecutado un diagnóstico del sistema. Estado general: ok. Modelos operativos: 0/4. Bloques en el ledger: 12.",
+  "resultado": { "estado": "ok", "componentes": { "...": "..." } },
+  "bloque_ledger": 12,
+  "hash_bloque": "a1b2…"
+}
+```
+
+**Respuesta 200 (plan de ML, requiere datos)**
+```json
+{
+  "plan": "APRENDIZAJE_PROFUNDO",
+  "estado": "requiere_datos",
+  "mensaje": "He interpretado tu intención como un plan de aprendizaje profundo (red neuronal). Este plan… envíalos al endpoint maestro POST /api/v5/uasi-master-execute…",
+  "resultado": null,
+  "bloque_ledger": 13,
+  "hash_bloque": "c3d4…"
+}
+```
 
 ## 5. POST `/api/v5/streaming-ingest`
 

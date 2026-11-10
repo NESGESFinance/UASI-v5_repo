@@ -6,6 +6,29 @@ sigue [Versionado Semántico](https://semver.org/lang/es/).
 
 ---
 
+## [5.4.0-enterprise] - 2026-11-10
+
+Capa de orquestación conversacional: UASI como única puerta de interacción agéntica.
+
+### Añadido
+- **Endpoint `POST /api/v5/orquestar`** (capa de orquestación conversacional). Recibe una intención en
+  lenguaje natural, el guárdian la clasifica con la allow-list semántica, el orquestador elige el plan por
+  prioridad y, cuando el plan no requiere datos (diagnóstico / auditoría), lo ejecuta y responde en lenguaje
+  legible. A diferencia de `uasi-master-execute`, **nunca falla por falta de datos**: si el plan es de
+  entrenamiento de ML, devuelve estado `requiere_datos` con la guía para completarlo. Cada interacción se
+  ancla en el ledger inmutable (evento `ORQUESTACION_INTERACCION`). Protegido con `Bearer` (cualquier usuario
+  autenticado). Prompts sin intención permitida o con patrones de inyección responden 403.
+- **Modelo `SolicitudOrquestacion`** (`intencion`, `id_sesion` + campos comunes).
+- **7 pruebas** en `tests/test_orquestacion.py` (diagnóstico completado, auditoría completada, plan ML
+  `requiere_datos`, rechazo de intención desconocida, rechazo de inyección, auditoría de cada interacción,
+  autenticación obligatoria).
+
+### Cambiado
+- Versión `5.3.1-enterprise` → `5.4.0-enterprise` (nueva funcionalidad, versionado semántico MINOR).
+- `docs/api_reference.md`: documentación del endpoint `/api/v5/orquestar` (sección 4b).
+
+---
+
 ## [5.3.1-enterprise] - 2026-11-10
 
 Login real por usuario y contraseña, y gestión de usuarios administradores.

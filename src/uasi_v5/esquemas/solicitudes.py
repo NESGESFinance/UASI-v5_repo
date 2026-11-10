@@ -88,6 +88,15 @@ class SolicitudMaestraV5(_BaseSolicitud):
         return self
 
 
+class SolicitudOrquestacion(_BaseSolicitud):
+    """Consola conversacional UASI: intención en lenguaje natural → el orquestador
+    semántico interpreta, decide la ruta y audita en el ledger. No exige datos ML:
+    cuando el plan detectado requiere inputs/targets, la respuesta lo indica."""
+
+    intencion: str = Field(..., min_length=3, max_length=2000)
+    id_sesion: Optional[str] = Field(default=None, max_length=128)
+
+
 class SolicitudStreaming(_BaseSolicitud):
     """Ingesta online: admite multiclase (clases dinámicas)."""
 
