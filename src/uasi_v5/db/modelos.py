@@ -81,6 +81,22 @@ class AdminSession(Base):
     peticiones: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
+class Usuario(Base):
+    """Cuenta que puede iniciar sesión (POST /api/v5/token) con usuario y contraseña."""
+
+    __tablename__ = "usuarios"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    # Scopes del JWT emitido al autenticarse: "uasi:full" o "uasi:full admin".
+    scopes: Mapped[str] = mapped_column(String(128), nullable=False, default="uasi:full")
+    # Borrado lógico: un usuario inactivo no puede autenticarse (1 = activo, 0 = inactivo).
+    activo: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    creado: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=ahora_utc)
+    ultimo_acceso: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class LedgerInmutableError(RuntimeError):
     """Intento de modificar o borrar una entrada del ledger (append-only)."""
 

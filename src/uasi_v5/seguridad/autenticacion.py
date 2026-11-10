@@ -51,6 +51,45 @@ def emitir_token(sujeto: str, minutos: int = JWT_EXP_MINUTES, alcance: str = "ua
     return jwt.encode(claims, SECRET_JWT_KEY, algorithm=_algoritmo_jwt())
 
 
+_hash_dummy_cache: Optional[str] = None
+
+
+def _hash_dummy() -> str:
+    """Hash constante para comparar cuando el usuario no existe (mitiga fuga por tiempo)."""
+    global _hash_dummy_cache
+    if _hash_dummy_cache is None:
+        from uasi_v5.seguridad.contrasenas import hash_password
+
+        _hash_dummy_cache = hash_password("usuario-inexistente-timing-guard")
+    return _hash_dummy_cache
+
+
+def verificar_credenciales(username: str, contrasena: str) -> Optional[Dict[str, str]]:
+    """
+    Valida usuario/contraseña contra la tabla `usuarios`.
+
+    Devuelve {"sub": username, "scope": scopes} si las credenciales son válidas y el
+    usuario está activo; None en caso contrario. Ejecuta SIEMPRE una verificación bcrypt
+    (aunque el usuario no exista o esté inactivo) para no revelar por tiempo qué usuarios
+    existen. Actualiza `ultimo_acceso` cuando el login tiene éxito.
+    """
+    from sqlalchemy import select
+
+    from uasi_v5.db.modelos import Usuario
+    from uasi_v5.db.sesion import sesion_bd
+    from uasi_v5.seguridad.contrasenas import verificar_password
+
+    with sesion_bd() as s:
+        usuario = s.execute(select(Usuario).where(Usuario.username == username)).scalar_one_or_none()
+        activo = bool(usuario and usuario.activo)
+        hash_cmp = usuario.password_hash if activo and usuario else _hash_dummy()
+        valido = verificar_password(contrasena, hash_cmp)
+        if not activo or not valido or usuario is None:
+            return None
+        usuario.ultimo_acceso = ahora_utc()
+        return {"sub": usuario.username, "scope": usuario.scopes}
+
+
 async def require_auth(authorization: Optional[str] = Security(api_key_header)) -> Dict[str, Any]:
     """
     Dependencia FastAPI (equivalente idiomático a un decorador) que valida el JWT.

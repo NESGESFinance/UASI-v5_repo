@@ -13,6 +13,7 @@
 |---|---|---|---|---|
 | 1 | GET | [`/api/v5/health`](#1-get-apiv5health) | No | Estado de salud detallado. |
 | 2 | GET | [`/api/v5/token`](#2-get-apiv5token) | No (solo en desarrollo) | Emite un JWT de prueba. |
+| 2b | POST | [`/api/v5/token`](#2b-post-apiv5token) | No (usuario/contraseña) | Login real: devuelve un JWT para el usuario autenticado. |
 | 3 | POST | [`/api/v1/procesar`](#3-post-apiv1procesar) | Bearer | Entrenamiento de agentes legacy. |
 | 4 | POST | [`/api/v5/uasi-master-execute`](#4-post-apiv5uasi-master-execute) | Bearer | Orquestador semántico. |
 | 5 | POST | [`/api/v5/streaming-ingest`](#5-post-apiv5streaming-ingest) | Bearer | Aprendizaje online incremental. |
@@ -30,6 +31,10 @@
 | 17 | GET | [`/api/v5/admin/health/detailed`](#17-get-apiv5adminhealthdetailed) | Bearer · scope `admin` | Salud con dependencias (Redis, BD, JEV). |
 | 18 | POST | [`/api/v5/admin/tokens/revoke`](#18-post-apiv5admintokensrevoke) | Bearer · scope `admin` | Revoca un JWT por `jti`. |
 | 19 | WS | [`/ws/agents`](#19-ws-wsagents) | `?token=<JWT>` | Estado de agentes en tiempo real. |
+| 20 | GET | [`/api/v5/admin/users`](#20-get-apiv5adminusers) | Bearer · scope `admin` | Lista de usuarios (sin hash). |
+| 21 | POST | [`/api/v5/admin/users`](#21-post-apiv5adminusers) | Bearer · scope `admin` | Crea un usuario. |
+| 22 | PATCH | [`/api/v5/admin/users/{username}`](#22-patch-apiv5adminusersusername) | Bearer · scope `admin` | Actualiza contraseña, scopes o estado. |
+| 23 | DELETE | [`/api/v5/admin/users/{username}`](#23-delete-apiv5adminusersusername) | Bearer · scope `admin` | Desactiva (borrado lógico) un usuario. |
 
 ---
 
@@ -676,3 +681,51 @@ Conexión: `ws://<host>:8000/ws/agents?token=<JWT>`. Cada `UASI_WS_INTERVALO_SEG
 
 El servidor cierra con código **1008** (*policy violation*) si el token falta, es inválido, está revocado o caduca
 durante la conexión.
+
+---
+
+## 2b. POST `/api/v5/token`
+
+Login real por usuario y contraseña. **Funciona en todos los entornos**, incluida producción (a diferencia del
+`GET /api/v5/token`, que solo existe en desarrollo). Verifica las credenciales contra la tabla `usuarios` y
+devuelve un JWT firmado con los scopes del usuario.
+
+Cuerpo (JSON): `{"username": "admin", "password": "<contraseña>"}`
+
+```json
+{
+  "access_token": "eyJhbGciOiersyeyJ...",
+  "token_type": "bearer",
+  "expires_in": 3600,
+  "scope": "uasi:full admin"
+}
+```
+
+Responde **401** con `{"detail": "Credenciales inválidas."}` si el usuario no existe, la contraseña es incorrecta
+o la cuenta está desactivada (no se distingue el motivo). **503** si el servidor no tiene `SECRET_JWT_KEY`.
+
+El administrador inicial se crea con `python -m scripts.crear_admin` (lee `UASI_ADMIN_USER` /
+`UASI_ADMIN_PASSWORD`).
+
+---
+
+## 20. GET `/api/v5/admin/users`
+
+Lista los usuarios. **Nunca** devuelve el `password_hash`.
+`{"timestamp": "...", "total": 2, "usuarios": [{"username": "admin", "scopes": "uasi:full admin", "activo": true, "creado": "...", "ultimo_acceso": "..."}]}`
+
+## 21. POST `/api/v5/admin/users`
+
+Crea un usuario. Cuerpo: `{"username": "operador", "password": "<≥10 caracteres>", "scopes": "uasi:full"}`
+(`scopes` admite `"uasi:full"` o `"uasi:full admin"`). Responde **201** con el usuario creado; **409** si el
+`username` ya existe; **422** si la contraseña tiene menos de 10 caracteres.
+
+## 22. PATCH `/api/v5/admin/users/{username}`
+
+Actualiza campos del usuario. Cuerpo (todos opcionales): `{"password": "...", "scopes": "...", "activo": true}`.
+Responde **200** con el usuario actualizado; **404** si no existe.
+
+## 23. DELETE `/api/v5/admin/users/{username}`
+
+Desactiva (borrado lógico: `activo = false`) al usuario, que deja de poder autenticarse. Responde **200**;
+**400** si intenta desactivar su propia cuenta en uso; **404** si no existe.
